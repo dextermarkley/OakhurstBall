@@ -3,12 +3,14 @@ import { RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { applyUpdate, useUpdateReady } from '@/pwa';
 import { useNotifyBarVisible } from '@/notifications';
+import { useInstall } from '@/install';
 import { cn } from '@/lib/utils';
 
 /** Floating "new version" pill. Hidden on the kiosk, which updates itself when idle. */
 export function UpdateBanner() {
   const ready = useUpdateReady();
-  const barVisible = useNotifyBarVisible(); // sit above the notifications bar
+  const install = useInstall();
+  const barVisible = useNotifyBarVisible() || install.barVisible; // sit above either bottom bar
   const { pathname } = useLocation();
   if (!ready || pathname.startsWith('/kiosk')) return null;
   const chat = pathname.startsWith('/chat'); // the message box lives at the bottom there

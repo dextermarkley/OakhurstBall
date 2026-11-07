@@ -18,6 +18,14 @@ const emit = () => listeners.forEach((l) => l());
 
 export function registerServiceWorker() {
   if (!('serviceWorker' in navigator) || import.meta.env.DEV) return;
+  // On a first visit the worker downloads the whole app at once. Start it only
+  // after this page has loaded, so the two don't compete for the server.
+  const start = () => setTimeout(register, 3000);
+  if (document.readyState === 'complete') start();
+  else window.addEventListener('load', start, { once: true });
+}
+
+function register() {
   apply = registerSW({
     immediate: true,
     onNeedRefresh() {

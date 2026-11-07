@@ -197,8 +197,12 @@ export class OakhurstStack extends cdk.Stack {
     const postAuthFn = makeFn('postauth', 'post-auth.ts', dataEnv); // cognito user → player
 
     // The SPA ships inside the web Lambda: copy frontend/dist into the bundle.
-    if (!fs.existsSync(path.join(frontendDist, 'index.html'))) {
-      throw new Error(`Build the frontend first: ${frontendDist}/index.html is missing`);
+    // sw.js is written last by the build, so its absence means the build is
+    // missing or still running: never ship a half-written site.
+    for (const f of ['index.html', 'sw.js', 'push-sw.js']) {
+      if (!fs.existsSync(path.join(frontendDist, f))) {
+        throw new Error(`Build the frontend first (and let it finish): ${frontendDist}/${f} is missing`);
+      }
     }
     const webFn = makeFn(
       'web',

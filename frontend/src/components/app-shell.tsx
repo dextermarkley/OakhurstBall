@@ -1,6 +1,8 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
-import { Bell, BellOff, Home, LogOut, MessagesSquare, RefreshCw, Repeat } from 'lucide-react';
+import { Bell, BellOff, Download, Home, LogOut, MessagesSquare, RefreshCw, Repeat } from 'lucide-react';
+import { promptInstall, useInstall } from '@/install';
+import { InstallHelpDialog } from '@/components/install-banner';
 import { useChatUnread } from '@/chat-unread';
 import { APP_VERSION, applyUpdate, useUpdateReady } from '@/pwa';
 import { setSignedIn, useNotifications, useNotifyBarVisible } from '@/notifications';
@@ -97,10 +99,18 @@ export function AppShell({
 function UserMenu({ user, onSignOut }: { user: ShellUser; onSignOut: () => void }) {
   const updateReady = useUpdateReady();
   const n = useNotifications();
+  const inst = useInstall();
   const [help, setHelp] = useState(false);
+  const [installHelp, setInstallHelp] = useState(false);
+  const canInstall = inst.kind !== 'none' && !inst.installed;
+  async function install() {
+    if (inst.canPrompt && (await promptInstall()) !== 'unavailable') return;
+    setInstallHelp(true);
+  }
   return (
     <>
     <NotifyHelpDialog open={help} onClose={() => setHelp(false)} isAdmin={user.isAdmin} />
+    <InstallHelpDialog open={installHelp} onClose={() => setInstallHelp(false)} kind={inst.kind} />
     <DropdownMenu>
       <DropdownMenuTrigger
         render={
@@ -132,6 +142,11 @@ function UserMenu({ user, onSignOut }: { user: ShellUser; onSignOut: () => void 
             </DropdownMenuItem>
             <DropdownMenuSeparator />
           </>
+        )}
+        {canInstall && (
+          <DropdownMenuItem onClick={install}>
+            <Download /> Install the app
+          </DropdownMenuItem>
         )}
         {n.supported && (
           <DropdownMenuItem onClick={() => setHelp(true)}>

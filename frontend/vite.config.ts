@@ -66,5 +66,27 @@ export default defineConfig({
     }),
   ],
   resolve: { alias: { '@': path.resolve(__dirname, './src') } },
-  build: { outDir: 'dist', sourcemap: false, chunkSizeWarningLimit: 900 },
+  build: {
+    outDir: 'dist',
+    sourcemap: false,
+    chunkSizeWarningLimit: 900,
+    rollupOptions: {
+      output: {
+        // A handful of files instead of dozens of tiny ones (one per icon or UI
+        // part): every file is a separate request to the site's Lambda, and a
+        // first visit firing ~30 at once can briefly exceed its concurrency.
+        // Heavy admin/kiosk-only libraries stay in their own files.
+        // Only the core libraries every page uses are grouped by name; everything
+        // else (charts, QR) is left to the bundler, so it stays with the pages
+        // that need it.
+        manualChunks(id) {
+          const m = /node_modules\/((?:@[^/]+\/)?[^/]+)\//.exec(id);
+          if (!m) return undefined;
+          const CORE =
+            /^(react|react-dom|scheduler|react-router|react-router-dom|@remix-run\/.*|aws-amplify|@aws-amplify\/.*|@aws-crypto\/.*|@aws-sdk\/.*|@smithy\/.*|tslib|@base-ui\/.*|@floating-ui\/.*|lucide-react|sonner|workbox-window|zod|react-hook-form|@hookform\/.*|clsx|tailwind-merge|class-variance-authority|js-cookie|uuid)$/;
+          return CORE.test(m[1]) ? 'vendor' : undefined;
+        },
+      },
+    },
+  },
 });
