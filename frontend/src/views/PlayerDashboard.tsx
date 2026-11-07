@@ -244,7 +244,7 @@ function PlanCard({ s, className, onBuy }: { s: MySession; className?: string; o
                 {planName(o.plan)} <span className="tabular text-muted-foreground">· {money(o.priceCents)}</span>
               </div>
               <div className="truncate text-xs text-muted-foreground">
-                {o.status === 'owned' ? `You have this through ${ymdText(o.end)}` : `Free check-ins through ${ymdText(o.end)}`}
+                {o.status === 'owned' ? `You have this through ${ymdText(o.end)}` : `Access through ${ymdText(o.end)}`}
               </div>
             </div>
             {o.status === 'available' && (

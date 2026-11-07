@@ -40,7 +40,7 @@ export function Home() {
             Check in, pay, and play.
           </h1>
           <p className="mt-4 text-lg text-pretty text-muted-foreground">
-            Drop in for $5, or grab a quarter pass and stop thinking about it. Everything for the club in one place.
+            Drop in for $5, or grab a quarter pass and stop thinking about it.
           </p>
         </div>
 

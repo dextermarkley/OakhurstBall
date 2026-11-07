@@ -32,6 +32,7 @@ import {
   playerPayments,
   createKiosk,
   listKiosks,
+  deleteKiosk,
   listAdminsDetailed,
   setAdminEmail,
 } from '../lib/repo.js';
@@ -884,6 +885,13 @@ async function apiRouter(
     }
     const result = await createKiosk(String(deviceId), String(label ?? ''));
     return created(result); // { deviceId, label, token } — token shown once
+  }
+
+  // DELETE /api/admin/kiosks/{deviceId} — remove an iPad. Its token stops working
+  // at once, and the iPad goes back to its pairing screen on its next request.
+  const kioskMatch = path.match(/^\/api\/admin\/kiosks\/([a-zA-Z0-9][a-zA-Z0-9_-]{1,63})$/);
+  if (kioskMatch && m === 'DELETE') {
+    return ok({ removed: await deleteKiosk(kioskMatch[1]) });
   }
 
   return notFound();

@@ -212,6 +212,12 @@ export const api = {
       { headers: await authHeaders() },
     );
   },
+  async deleteKiosk(deviceId: string) {
+    return req<{ removed: boolean }>(`/api/admin/kiosks/${encodeURIComponent(deviceId)}`, {
+      method: 'DELETE',
+      headers: await authHeaders(),
+    });
+  },
   async createKiosk(deviceId: string, label?: string) {
     return req<{ deviceId: string; label: string; token: string }>('/api/admin/kiosks', {
       method: 'POST',

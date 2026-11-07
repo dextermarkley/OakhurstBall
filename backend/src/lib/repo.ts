@@ -5,6 +5,7 @@ import {
   QueryCommand,
   TransactWriteCommand,
   UpdateCommand,
+  DeleteCommand,
 } from '@aws-sdk/lib-dynamodb';
 import { ddb, TABLE, GSI1, keys, gsi } from './ddb.js';
 import { newId } from './crypto.js';
@@ -259,6 +260,14 @@ export async function createKiosk(
     }),
   );
   return { deviceId, label: device.label, token };
+}
+
+/** Remove a kiosk device. False if there was no such device. */
+export async function deleteKiosk(deviceId: string): Promise<boolean> {
+  const r = await ddb.send(
+    new DeleteCommand({ TableName: TABLE, Key: keys.kioskProfile(deviceId), ReturnValues: 'ALL_OLD' }),
+  );
+  return !!r.Attributes;
 }
 
 /** List provisioned kiosk devices (no secrets) via GSI1PK=KIOSK. */

@@ -19,6 +19,7 @@ import {
   ShieldCheck,
   Tablet,
   Ticket,
+  Trash2,
   UserPlus,
   Users,
 } from 'lucide-react';
@@ -1069,6 +1070,28 @@ function KiosksTab() {
     load();
   }, [load]);
 
+  const confirm = useConfirm();
+  const [removing, setRemoving] = useState<string | null>(null);
+  async function removeKiosk(k: { deviceId: string; label: string }) {
+    const ok = await confirm({
+      title: `Remove ${k.label || k.deviceId}?`,
+      description: 'It stops working right away and goes back to its pairing screen. You can pair it again later with a new QR code.',
+      confirmLabel: 'Remove iPad',
+      destructive: true,
+    });
+    if (!ok) return;
+    setRemoving(k.deviceId);
+    try {
+      await api.deleteKiosk(k.deviceId);
+      toast.success(`${k.label || k.deviceId} removed.`);
+      await load();
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setRemoving(null);
+    }
+  }
+
   const form = useForm<z.infer<typeof kioskSchema>>({ resolver: zodResolver(kioskSchema), defaultValues: { deviceId: '', label: '' } });
   const submit = form.handleSubmit(async (v) => {
     try {
@@ -1119,6 +1142,9 @@ function KiosksTab() {
                   <TableHead>iPad</TableHead>
                   <TableHead>Device ID</TableHead>
                   <TableHead className="text-right">Status</TableHead>
+                  <TableHead className="w-12">
+                    <span className="sr-only">Remove</span>
+                  </TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -1134,6 +1160,17 @@ function KiosksTab() {
                       <Badge className={k.active ? 'bg-success/12 text-success' : 'bg-muted text-muted-foreground'}>
                         {k.active ? 'Active' : 'Disabled'}
                       </Badge>
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        aria-label={`Remove ${k.label || k.deviceId}`}
+                        disabled={removing === k.deviceId}
+                        onClick={() => removeKiosk(k)}
+                      >
+                        {removing === k.deviceId ? <Spinner /> : <Trash2 />}
+                      </Button>
                     </TableCell>
                   </TableRow>
                 ))}

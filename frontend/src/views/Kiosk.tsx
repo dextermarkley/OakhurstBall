@@ -428,7 +428,7 @@ export function Kiosk() {
               key={o.plan}
               icon={<Ticket className="size-5" />}
               title={`${planName(o.plan)} · ${money(o.priceCents)}`}
-              sub={o.status === 'owned' ? `You have this (${o.label})` : `Free check-ins through ${ymdText(o.end)}`}
+              sub={o.status === 'owned' ? `You have this (${o.label})` : `Access through ${ymdText(o.end)}`}
               owned={o.status === 'owned'}
             >
               {o.status === 'available' && (
