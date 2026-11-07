@@ -85,3 +85,19 @@ address works.
 
 SMS is not used: US texts need a registered toll-free/10DLC number (~$2/mo plus a
 multi-day carrier registration).
+
+## Reset test data
+
+Before launch, wipe everything except the admin account:
+
+```bash
+cd backend
+node scripts/reset-data.mjs          # dry run: shows what would be deleted
+node scripts/reset-data.mjs --yes    # do it
+```
+
+Deletes every session, check-in, payment, pass and Cognito user. Keeps
+dextermarkley@gmail.com (login, admin group, cash-confirm email, player profile
+and PIN, with the balance reset to $0) and the paired iPads. Options:
+`--keep other@example.com` (repeatable), `--include-kiosks` (un-pair iPads too).
+Stripe keys, email setup and the domain are untouched.
