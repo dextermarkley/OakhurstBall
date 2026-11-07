@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // Wipe the app back to a clean slate, keeping only the listed admin account(s).
 //
-// Deletes: every session, check-in, payment, pass, confirm link, player and
+// Deletes: every session, check-in, payment, pass, confirm link, announcement,
+//          RSVP, chat message + image, notification device, player and
 //          Cognito user — except the kept admin(s).
 // Keeps:   the kept admins' Cognito login, admin group membership, admin record
 //          (cash-confirm email), their player profile and kiosk PIN (balance → $0),
@@ -20,6 +21,7 @@ import {
   CognitoIdentityProviderClient,
   ListUsersCommand,
 } from '@aws-sdk/client-cognito-identity-provider';
+import { DeleteObjectsCommand, ListBucketsCommand, ListObjectsV2Command, S3Client } from '@aws-sdk/client-s3';
 
 const REGION = process.env.AWS_REGION ?? 'us-west-2';
 const TABLE = process.env.TABLE_NAME ?? 'oakhurst';
@@ -78,6 +80,21 @@ console.log(`Keeping ${kept.length} table items: ${tally(kept) || 'none'}`);
 console.log(`Deleting ${drop.length} table items: ${tally(drop) || 'none'}`);
 console.log(`Kept player profiles reset to a $0 balance: ${keptPlayerIds.size}`);
 
+// ── Chat images (S3) ──
+const s3 = new S3Client({ region: REGION });
+const bucket =
+  process.env.CHAT_BUCKET ??
+  (await s3.send(new ListBucketsCommand({}))).Buckets?.map((b) => b.Name).find((n) => n?.startsWith('oakhurstbasketball-chatmedia'));
+const mediaKeys = [];
+if (bucket) {
+  for (let token; ; ) {
+    const r = await s3.send(new ListObjectsV2Command({ Bucket: bucket, Prefix: 'chat/', ContinuationToken: token }));
+    mediaKeys.push(...(r.Contents ?? []).map((o) => o.Key));
+    if (!(token = r.NextContinuationToken)) break;
+  }
+}
+console.log(`Deleting chat images: ${mediaKeys.length}${bucket ? ` (s3://${bucket})` : ' (no chat bucket found)'}`);
+
 if (!apply) {
   console.log('\nDry run — nothing changed. Re-run with --yes to apply.');
   process.exit(0);
@@ -98,6 +115,12 @@ for (const pid of keptPlayerIds) {
     Key: { PK: `PLAYER#${pid}`, SK: 'PROFILE' },
     UpdateExpression: 'SET balanceCents = :z, updatedAt = :now',
     ExpressionAttributeValues: { ':z': 0, ':now': new Date().toISOString() },
+  }));
+}
+for (let i = 0; i < mediaKeys.length; i += 1000) {
+  await s3.send(new DeleteObjectsCommand({
+    Bucket: bucket,
+    Delete: { Objects: mediaKeys.slice(i, i + 1000).map((Key) => ({ Key })), Quiet: true },
   }));
 }
 for (const u of dropUsers) await cognito.send(new AdminDeleteUserCommand({ UserPoolId: POOL, Username: u.Username }));

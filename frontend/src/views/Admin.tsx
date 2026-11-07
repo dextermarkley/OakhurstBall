@@ -62,6 +62,7 @@ import { cn } from '@/lib/utils';
 import { pairingUrl } from '@/pairing';
 import { AuthGate } from './AuthGate';
 import { StatusBadge } from './PlayerDashboard';
+import { AnnounceAdminCard } from '@/components/announcement';
 
 export function Admin() {
   return <AuthGate>{(signOut) => <AdminInner signOut={signOut} />}</AuthGate>;
@@ -197,6 +198,8 @@ function OverviewTab({ onGo }: { onGo: (t: TabId) => void }) {
   return (
     <div className="space-y-6">
       <PageHeader title="Overview" description="How the club is doing at a glance." />
+
+      <AnnounceAdminCard />
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard
           label="Gym"
@@ -359,6 +362,8 @@ function SessionsTab() {
   return (
     <div className="space-y-6">
       <PageHeader title="Sessions" description="Open the gym so players can check in. Sessions close automatically after 5 hours." />
+
+      <AnnounceAdminCard />
 
       {sessions === null ? (
         <Skeleton className="h-40 rounded-xl" />

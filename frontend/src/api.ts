@@ -43,6 +43,90 @@ export const api = {
   async myBalance() {
     return req<any>('/api/me/balance', { headers: await authHeaders() });
   },
+  // announcement + RSVP
+  async announcement() {
+    return req<{ announcement: Announcement | null; defaultText: string; myPlayerId: string | null }>(
+      '/api/announcement',
+      { headers: await authHeaders() },
+    );
+  },
+  async rsvp(announceId: string, status: RsvpStatus | null) {
+    return req<{ announcement: Announcement | null }>('/api/announcement/rsvp', {
+      method: 'POST',
+      headers: await authHeaders(),
+      body: JSON.stringify({ announceId, status }),
+    });
+  },
+  async postAnnouncement(text: string) {
+    return req<{ announcement: Announcement }>('/api/admin/announcement', {
+      method: 'POST',
+      headers: await authHeaders(),
+      body: JSON.stringify({ text }),
+    });
+  },
+  async editAnnouncement(announceId: string, text: string, notify: boolean) {
+    return req<{ announcement: Announcement | null }>('/api/admin/announcement', {
+      method: 'PUT',
+      headers: await authHeaders(),
+      body: JSON.stringify({ announceId, text, notify }),
+    });
+  },
+  async removeAnnouncement(announceId: string) {
+    return req<{ removed: boolean }>('/api/admin/announcement', {
+      method: 'DELETE',
+      headers: await authHeaders(),
+      body: JSON.stringify({ announceId }),
+    });
+  },
+  // chat
+  async chat(q: { before?: string } = {}) {
+    const qs = q.before ? `?before=${encodeURIComponent(q.before)}` : '';
+    return req<{ messages: ChatMessage[]; hasMore: boolean; now: string; mySub: string }>(`/api/chat${qs}`, {
+      headers: await authHeaders(),
+    });
+  },
+  async chatPoll(after: string, since: string) {
+    return req<{ messages: ChatMessage[]; deleted: string[]; now: string }>(
+      `/api/chat?after=${encodeURIComponent(after)}&since=${encodeURIComponent(since)}`,
+      { headers: await authHeaders() },
+    );
+  },
+  async chatSend(m: { text?: string; imageKey?: string; width?: number; height?: number }) {
+    return req<{ message: ChatMessage }>('/api/chat', {
+      method: 'POST',
+      headers: await authHeaders(),
+      body: JSON.stringify(m),
+    });
+  },
+  async chatUpload(file: Blob) {
+    const t = await req<{ key: string; url: string; fields: Record<string, string> }>('/api/chat/upload', {
+      method: 'POST',
+      headers: await authHeaders(),
+      body: JSON.stringify({ contentType: file.type, size: file.size }),
+    });
+    const form = new FormData();
+    for (const [k, v] of Object.entries(t.fields)) form.append(k, v);
+    form.append('file', file);
+    const r = await fetch(t.url, { method: 'POST', body: form });
+    if (!r.ok) throw new Error(r.status === 400 ? 'That image is too big or not supported' : 'Upload failed');
+    return t.key;
+  },
+  async chatLatest() {
+    return req<{ cursor: string | null; mine: boolean }>('/api/chat/latest', { headers: await authHeaders() });
+  },
+  async chatDelete(cursor: string) {
+    return req('/api/chat/delete', { method: 'POST', headers: await authHeaders(), body: JSON.stringify({ cursor }) });
+  },
+  async chatPrefs() {
+    return req<{ chatNotify: boolean }>('/api/chat/prefs', { headers: await authHeaders() });
+  },
+  async setChatPrefs(chatNotify: boolean) {
+    return req<{ chatNotify: boolean }>('/api/chat/prefs', {
+      method: 'PUT',
+      headers: await authHeaders(),
+      body: JSON.stringify({ chatNotify }),
+    });
+  },
   // notifications (Web Push)
   async pushKey() {
     return req<{ publicKey: string }>('/api/me/push', { headers: await authHeaders() });
@@ -189,6 +273,32 @@ export const api = {
     });
   },
 };
+
+export type RsvpStatus = 'in' | 'out';
+export interface Rsvp {
+  playerId: string;
+  name: string;
+  status: RsvpStatus;
+  at: string;
+}
+export interface Announcement {
+  announceId: string;
+  text: string;
+  date: string;
+  createdAt: string;
+  updatedAt: string;
+  createdByName: string;
+  rsvps: Rsvp[];
+}
+export interface ChatMessage {
+  messageId: string;
+  cursor: string;
+  sub: string;
+  name: string;
+  text?: string;
+  image?: { url: string; width?: number; height?: number };
+  createdAt: string;
+}
 
 export interface Session {
   sessionId: string;

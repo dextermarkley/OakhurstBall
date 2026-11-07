@@ -11,11 +11,12 @@ export function UpdateBanner() {
   const barVisible = useNotifyBarVisible(); // sit above the notifications bar
   const { pathname } = useLocation();
   if (!ready || pathname.startsWith('/kiosk')) return null;
+  const chat = pathname.startsWith('/chat'); // the message box lives at the bottom there
   return (
     <div
       className={cn(
-        'safe-bottom pointer-events-none fixed inset-x-0 z-50 flex justify-center px-4',
-        barVisible ? 'bottom-40 sm:bottom-24' : 'bottom-4',
+        'pointer-events-none fixed inset-x-0 z-50 flex justify-center px-4',
+        chat ? 'safe-top top-16' : cn('safe-bottom', barVisible ? 'bottom-40 sm:bottom-24' : 'bottom-4'),
       )}
     >
       <div

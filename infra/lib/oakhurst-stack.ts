@@ -13,6 +13,7 @@ import * as acm from 'aws-cdk-lib/aws-certificatemanager';
 import * as route53 from 'aws-cdk-lib/aws-route53';
 import * as route53targets from 'aws-cdk-lib/aws-route53-targets';
 import * as ses from 'aws-cdk-lib/aws-ses';
+import * as s3 from 'aws-cdk-lib/aws-s3';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 import { createHash } from 'node:crypto';
@@ -251,6 +252,24 @@ export class OakhurstStack extends cdk.Stack {
       }),
     );
 
+    // ───────────────────────── Chat images (S3) ─────────────────────────────
+    // Private bucket, pay per use. Browsers upload with a presigned POST and read
+    // through short-lived signed URLs (see backend/src/lib/chat.ts).
+    const siteOrigins = apex ? [`https://${apex}`, `https://www.${apex}`] : ['*'];
+    const chatBucket = new s3.Bucket(this, 'ChatMedia', {
+      blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
+      encryption: s3.BucketEncryption.S3_MANAGED,
+      enforceSSL: true,
+      removalPolicy: cdk.RemovalPolicy.RETAIN, // people's photos: never lost to a stack change
+      cors: [{ allowedMethods: [s3.HttpMethods.POST], allowedOrigins: siteOrigins, allowedHeaders: ['*'], maxAge: 3600 }],
+      lifecycleRules: [{ abortIncompleteMultipartUploadAfter: cdk.Duration.days(1) }],
+    });
+    chatBucket.grantPut(apiFn, 'chat/*');
+    chatBucket.grantRead(apiFn, 'chat/*');
+    chatBucket.grantDelete(apiFn, 'chat/*');
+    apiFn.addEnvironment('CHAT_BUCKET', chatBucket.bucketName);
+    new cdk.CfnOutput(this, 'ChatBucket', { value: chatBucket.bucketName });
+
     // Web Push VAPID keys (also created outside CDK; see docs/notifications.md).
     // Both functions settle payments, and settling notifies the player.
     for (const fn of [apiFn, confirmFn]) {
@@ -328,6 +347,12 @@ export class OakhurstStack extends cdk.Stack {
     httpApi.addRoutes({
       path: '/api/stripe/{proxy+}',
       methods: [apigwv2.HttpMethod.GET, apigwv2.HttpMethod.POST],
+      integration: apiIntegration,
+    });
+    // Chat images for <img> tags (no token possible) — random ids, signed redirects.
+    httpApi.addRoutes({
+      path: '/api/media/{proxy+}',
+      methods: [apigwv2.HttpMethod.GET],
       integration: apiIntegration,
     });
     // Magic-link confirm — the unguessable token in the path is the auth.

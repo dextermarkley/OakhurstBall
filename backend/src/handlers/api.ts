@@ -81,6 +81,29 @@ import {
   vapidPublicKey,
 } from '../lib/push.js';
 import {
+  DEFAULT_ANNOUNCEMENT,
+  cleanText,
+  currentAnnouncement,
+  editAnnouncement,
+  postAnnouncement,
+  removeAnnouncement,
+  setRsvp,
+} from '../lib/announce.js';
+import {
+  changesSince,
+  checkUpload,
+  deleteMessage,
+  getChatPrefs,
+  latestMessage,
+  listMessages,
+  markChatSeen,
+  mediaUrl,
+  notifyChat,
+  postMessage,
+  setChatNotify,
+  uploadTicket,
+} from '../lib/chat.js';
+import {
   coveringPass,
   purchasable,
   currentPassHolders,
@@ -153,6 +176,7 @@ export const handler = async (
     // `return await` so rejections land in the catch below.
     if (path.startsWith('/api/kiosk/')) return await kioskRouter(event, path.slice(4), m);
     if (path.startsWith('/api/stripe/')) return await stripeRouter(event, path, m);
+    if (path.startsWith('/api/media/')) return await mediaRouter(path, m);
     if (path.startsWith('/api/')) return await apiRouter(event, path, m);
     return notFound();
   } catch (err) {
@@ -340,6 +364,112 @@ async function kioskRouter(
   return notFound();
 }
 
+// ─────────────────────────── Chat images (public) ────────────────────────────
+// <img> tags can't send a token, so this route is public. The path holds a random
+// 96-bit id, and it only ever redirects to a signed URL that expires in an hour.
+async function mediaRouter(path: string, m: string): Promise<APIGatewayProxyResultV2> {
+  if (m !== 'GET') return notFound();
+  const url = await mediaUrl(path.slice('/api/media/'.length));
+  if (!url) return notFound();
+  return { statusCode: 302, headers: { location: url, 'cache-control': 'private, max-age=3000' }, body: '' };
+}
+
+const CURSOR_RE = /^MSG#\d{4}-\d\d-\d\dT[\d:.]+Z#[a-f0-9]{24}$/;
+const ISO_RE = /^\d{4}-\d\d-\d\dT[\d:.]+Z$/;
+
+/** Chat + announcements: everything a signed-in member does together. */
+async function communityRouter(
+  event: APIGatewayProxyEventV2,
+  path: string,
+  m: string,
+  claims: NonNullable<ReturnType<typeof getClaims>>,
+  admin: boolean,
+): Promise<APIGatewayProxyResultV2 | null> {
+  // ── Announcement ──
+  // GET  /api/announcement                     today's announcement + RSVPs (or null)
+  // POST /api/announcement/rsvp {announceId, status: in|out|null}
+  if (path === '/api/announcement' && m === 'GET') {
+    const a = await currentAnnouncement();
+    const player = await getPlayerByCognitoSub(claims.sub);
+    return ok({
+      announcement: a,
+      defaultText: DEFAULT_ANNOUNCEMENT,
+      myPlayerId: player?.playerId ?? null,
+    });
+  }
+  if (path === '/api/announcement/rsvp' && m === 'POST') {
+    const { announceId, status } = parseBody(event);
+    if (status !== 'in' && status !== 'out' && status !== null) return badRequest("status must be 'in', 'out' or null");
+    const player = await getPlayerByCognitoSub(claims.sub);
+    if (!player) return notFound('no linked player profile');
+    const done = await setRsvp(String(announceId ?? ''), { playerId: player.playerId, name: player.name }, status);
+    if (!done) return json(409, { error: 'That announcement is no longer current' });
+    return ok({ announcement: await currentAnnouncement() });
+  }
+
+  // ── Chat ──
+  // GET  /api/chat                       newest page
+  // GET  /api/chat?before=<cursor>       older page
+  // GET  /api/chat?after=<cursor>&since=<iso>   poll: new messages + deletions
+  // POST /api/chat {text?, imageKey?, width?, height?}
+  // POST /api/chat/upload {contentType, size}  → presigned POST for one image
+  // POST /api/chat/delete {cursor}
+  // GET/PUT /api/chat/prefs {chatNotify}
+  if (path === '/api/chat' && m === 'GET') {
+    const q = event.queryStringParameters ?? {};
+    const now = new Date().toISOString();
+    await markChatSeen(claims.sub);
+    if (q.after) {
+      if (!CURSOR_RE.test(q.after) || !ISO_RE.test(q.since ?? '')) return badRequest('bad cursor');
+      return ok({ ...(await changesSince(q.after, q.since!)), now });
+    }
+    if (q.before && !CURSOR_RE.test(q.before)) return badRequest('bad cursor');
+    return ok({ ...(await listMessages(q.before)), now, mySub: claims.sub });
+  }
+  if (path === '/api/chat' && m === 'POST') {
+    const b = parseBody(event);
+    const player = await getPlayerByCognitoSub(claims.sub);
+    const name = player?.name || claims.name || claims.email?.split('@')[0] || 'Member';
+    const r = await postMessage({
+      sub: claims.sub,
+      name,
+      text: typeof b.text === 'string' ? b.text : undefined,
+      imageKey: b.imageKey,
+      width: b.width,
+      height: b.height,
+    });
+    if (r.error) return badRequest(r.error);
+    await notifyChat(r.message!).catch((e) => console.error('chat notify failed', e));
+    return created({ message: r.message });
+  }
+  if (path === '/api/chat/upload' && m === 'POST') {
+    const { contentType, size } = parseBody(event);
+    const bad = checkUpload(contentType, size);
+    if (bad) return badRequest(bad);
+    return ok(await uploadTicket(claims.sub, String(contentType)));
+  }
+  if (path === '/api/chat/delete' && m === 'POST') {
+    const { cursor } = parseBody(event);
+    const r = await deleteMessage(String(cursor ?? ''), { sub: claims.sub, isAdmin: admin });
+    if (r === 'notfound') return notFound('message');
+    if (r === 'forbidden') return forbidden();
+    return ok({ deleted: true });
+  }
+  // GET /api/chat/latest → { cursor, mine } for the unread dot (doesn't count as "seen")
+  if (path === '/api/chat/latest' && m === 'GET') {
+    const l = await latestMessage();
+    return ok({ cursor: l?.cursor ?? null, mine: l ? l.sub === claims.sub : false });
+  }
+  if (path === '/api/chat/prefs' && m === 'GET') return ok(await getChatPrefs(claims.sub));
+  if (path === '/api/chat/prefs' && m === 'PUT') {
+    const { chatNotify } = parseBody(event);
+    if (typeof chatNotify !== 'boolean') return badRequest('chatNotify must be true or false');
+    await setChatNotify(claims.sub, chatNotify);
+    return ok({ chatNotify });
+  }
+  return null;
+}
+
 // ──────────────────────── Authenticated routes ──────────────────────────────
 async function apiRouter(
   event: APIGatewayProxyEventV2,
@@ -349,6 +479,11 @@ async function apiRouter(
   const claims = getClaims(event);
   if (!claims) return unauthorized();
   const admin = isAdmin(claims);
+
+  if (path.startsWith('/api/chat') || path.startsWith('/api/announcement')) {
+    const r = await communityRouter(event, path, m, claims, admin);
+    if (r) return r;
+  }
 
   // GET /api/me — profile + role (+ linked player)
   if (path === '/api/me' && m === 'GET') {
@@ -634,6 +769,37 @@ async function apiRouter(
         autoClosed: !s.closedAt && s.closesAt <= now,
       })),
     });
+  }
+
+  // ── Announcement (admin) ──
+  // POST   /api/admin/announcement {text}                  post today's (notifies everyone)
+  // PUT    /api/admin/announcement {announceId, text, notify}  edit (RSVPs kept)
+  // DELETE /api/admin/announcement {announceId}            take it down
+  if (path === '/api/admin/announcement' && (m === 'POST' || m === 'PUT')) {
+    const b = parseBody(event);
+    const text = cleanText(b.text);
+    if (!text) return badRequest('Announcement must be 1–280 characters');
+    let a;
+    if (m === 'POST') {
+      a = await postAnnouncement(text, { sub: claims.sub, name: claims.name || claims.email || 'Admin' });
+    } else {
+      if (!(await editAnnouncement(String(b.announceId ?? ''), text))) {
+        return json(409, { error: 'That announcement is no longer current' });
+      }
+    }
+    if (m === 'POST' || b.notify) {
+      await sendPush((d) => d.sub !== claims.sub, {
+        title: m === 'POST' ? 'Oakhurst Basketball' : 'Updated: Oakhurst Basketball',
+        body: `${text} · Tap to RSVP`,
+        url: '/player',
+        tag: 'announcement',
+      }, { urgency: 'high', ttlSeconds: 12 * 3600 });
+    }
+    return m === 'POST' ? created({ announcement: { ...a, rsvps: [] } }) : ok({ announcement: await currentAnnouncement() });
+  }
+  if (path === '/api/admin/announcement' && m === 'DELETE') {
+    const { announceId } = parseBody(event);
+    return ok({ removed: await removeAnnouncement(String(announceId ?? '')) });
   }
 
   // POST /api/admin/sessions — open the gym (409 if a session is already open)

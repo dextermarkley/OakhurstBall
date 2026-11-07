@@ -123,21 +123,23 @@ export function NotifyHelpDialog({ open, onClose, isAdmin }: { open: boolean; on
           <DialogTitle>
             {on ? 'Notifications are on' : n.permission === 'denied' ? 'Unblock notifications' : 'Turn on notifications'}
           </DialogTitle>
-          <DialogDescription>
-            {on
-              ? "You're all set on this device."
-              : n.permission === 'denied'
-                ? 'This device blocked notifications for Oakhurst Basketball, so the app can’t ask again. Allow them in settings:'
-                : 'We’ll only notify you about things that matter:'}
-          </DialogDescription>
+          {(on || n.permission === 'denied') && (
+            <DialogDescription>
+              {on
+                ? "You're all set on this device."
+                : 'This device blocked notifications for Oakhurst Basketball, so the app can’t ask again. Allow them in settings:'}
+            </DialogDescription>
+          )}
         </DialogHeader>
 
         {!on && n.permission !== 'denied' && (
           <>
             <ul className="space-y-1.5 text-sm">
+              <Bullet>Today’s session is announced, so you can RSVP</Bullet>
               <Bullet>The gym is open and pickup has started</Bullet>
               <Bullet>Your payment went through, or a cash payment wasn’t confirmed</Bullet>
               {isAdmin && <Bullet>Someone handed you cash and it needs confirming</Bullet>}
+              <Bullet>New chat messages, if you turn that on in the chat</Bullet>
             </ul>
             {iosNotInstalled ? (
               <Steps

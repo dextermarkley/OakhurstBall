@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
-import { Bell, BellOff, LogOut, RefreshCw, Repeat } from 'lucide-react';
+import { Bell, BellOff, Home, LogOut, MessagesSquare, RefreshCw, Repeat } from 'lucide-react';
+import { useChatUnread } from '@/chat-unread';
 import { APP_VERSION, applyUpdate, useUpdateReady } from '@/pwa';
 import { setSignedIn, useNotifications, useNotifyBarVisible } from '@/notifications';
 import { NotifyBar, NotifyHelpDialog } from '@/components/notify-bar';
@@ -32,41 +33,63 @@ export function AppShell({
   onSignOut,
   children,
   wide,
+  fill,
+  hideNotifyBar,
 }: {
   section: string;
   user?: ShellUser;
   onSignOut?: () => void;
   children: ReactNode;
   wide?: boolean;
+  /** Content fills the screen below the header (the chat). */
+  fill?: boolean;
+  hideNotifyBar?: boolean;
 }) {
   const signedIn = !!(user && onSignOut);
-  const barVisible = useNotifyBarVisible();
+  const barVisible = useNotifyBarVisible() && !hideNotifyBar;
+  const inChat = section === 'Chat';
+  const chatUnread = useChatUnread(signedIn && !inChat);
   useEffect(() => {
     if (!signedIn) return;
     setSignedIn(true);
     return () => setSignedIn(false);
   }, [signedIn]);
   return (
-    <div className="min-h-dvh bg-background">
+    <div className={cn('bg-background', fill ? 'flex h-dvh flex-col overflow-hidden' : 'min-h-dvh')}>
       <header className="safe-top sticky top-0 z-30 border-b bg-background/85 backdrop-blur supports-[backdrop-filter]:bg-background/70">
-        <div className={cn('mx-auto flex h-14 items-center gap-3 px-4 sm:px-6', wide ? 'max-w-7xl' : 'max-w-5xl')}>
+        <div className={cn('mx-auto flex h-14 items-center gap-2 px-4 sm:gap-3 sm:px-6', wide ? 'max-w-7xl' : 'max-w-5xl')}>
           <Link to="/" className="rounded-md outline-none focus-visible:ring-3 focus-visible:ring-ring/50">
             <Logo sub={section} />
           </Link>
           <div className="flex-1" />
+          {signedIn &&
+            (inChat ? (
+              <Button variant="ghost" size="sm" render={<Link to="/player" />}>
+                <Home /> <span className="hidden sm:inline">My page</span>
+              </Button>
+            ) : (
+              <Button variant="ghost" size="sm" render={<Link to="/chat" />} aria-label={chatUnread ? 'Chat, new messages' : 'Chat'}>
+                <span className="relative">
+                  <MessagesSquare />
+                  {chatUnread && <span className="absolute -top-0.5 -right-0.5 size-2 rounded-full bg-brand ring-2 ring-background" />}
+                </span>
+                <span className="hidden sm:inline">Chat</span>
+              </Button>
+            ))}
           {user && onSignOut && <UserMenu user={user} onSignOut={onSignOut} />}
         </div>
       </header>
       <main
         className={cn(
-          'safe-bottom mx-auto px-4 py-6 sm:px-6 sm:py-8',
+          'safe-bottom mx-auto w-full px-4 sm:px-6',
+          fill ? 'flex min-h-0 flex-1 flex-col py-3 sm:py-4' : 'py-6 sm:py-8',
           wide ? 'max-w-7xl' : 'max-w-5xl',
           barVisible && 'pb-40 sm:pb-28', // room for the notifications bar
         )}
       >
         {children}
       </main>
-      {signedIn && <NotifyBar isAdmin={user?.isAdmin} />}
+      {signedIn && !hideNotifyBar && <NotifyBar isAdmin={user?.isAdmin} />}
     </div>
   );
 }
