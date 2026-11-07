@@ -61,10 +61,10 @@ try {
   check('kiosk session endpoint answers', r.status === 200 && 'session' in r.body, r);
 
   r = await call('/api/kiosk/pay', { playerId, pin: PIN, method: 'card' });
-  check('card pay → 503 until Stripe key is set', r.status === 503, r);
+  check('card pay → $20 Stripe checkout', r.status === 201 && r.body.amountCents === 2000 && /checkout\.stripe\.com/.test(r.body.checkoutUrl ?? ''), r.body);
 
   r = await call('/api/kiosk/pay', { playerId, pin: PIN, method: 'card', amountCents: 1 });
-  check('client cannot pick an amount (still 503, not a $0.01 charge)', r.status === 503, r);
+  check('client cannot pick an amount (server still charges $20, not $0.01)', r.status === 201 && r.body.amountCents === 2000, r.body);
 
   r = await call('/api/kiosk/pay', { playerId, pin: PIN, method: 'venmo' });
   check('unknown method rejected', r.status === 400, r);
@@ -73,10 +73,10 @@ try {
   check('unknown payment → 404', r.status === 404, r);
 
   r = await call('/api/stripe/return?session_id=cs_test_nope', null, {});
-  check('stripe return → 503 until configured', r.status === 503, r);
+  check('stripe return with an unknown session → 404, not a server error', r.status === 404, r);
 
   r = await call('/api/stripe/webhook', { type: 'x' }, { 'content-type': 'application/json', 'stripe-signature': 't=1,v1=00' });
-  check('stripe webhook → 503 until configured', r.status === 503, r);
+  check('stripe webhook rejects a forged signature', r.status === 400 && r.body?.error === 'bad signature', r);
 
   const page = await fetch(BASE + '/paid?session_id=x');
   check('/paid page served', page.status === 200 && (page.headers.get('content-type') ?? '').includes('text/html'), page.status);

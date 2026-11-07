@@ -62,7 +62,8 @@ const call = async (method, path, body, headers) => {
 };
 const kiosk = (path, body) => call(body ? 'POST' : 'GET', `/api/kiosk${path}`, body, K);
 const api = (method, path, body) => call(method, `/api${path}`, body, A);
-const checkin = (p) => kiosk('/checkin', { playerId: p.id, pin: PIN });
+// 'defer' = check in now; pass holders are covered either way.
+const checkin = (p) => kiosk('/checkin', { playerId: p.id, pin: PIN, mode: 'defer' });
 const balance = async (p) =>
   (await ddb.send(new GetCommand({ TableName: TABLE, Key: { PK: `PLAYER#${p.id}`, SK: 'PROFILE' } }))).Item?.balanceCents;
 const passesOf = async (p) =>
@@ -162,7 +163,7 @@ try {
 
   // ── card path and admin views ──
   r = await api('POST', '/me/pay-card', { plan: 'quarter' });
-  check('card pass purchase → 503 until Stripe is set up', r.status === 503, r);
+  check('card quarter pass → $80 Stripe checkout', r.status === 201 && r.body.amountCents === 8000 && /checkout\.stripe\.com/.test(r.body.checkoutUrl ?? ''), r);
   r = await kiosk('/pay', { playerId: P.d.id, pin: PIN, method: 'cash', adminId: cashAdminId, plan: 'year' });
   check('kiosk refuses a year pass after Q1 (409)', r.status === 409, r);
   r = await api('POST', '/me/pay-card', { plan: 'monthly' });

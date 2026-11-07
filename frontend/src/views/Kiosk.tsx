@@ -79,6 +79,7 @@ export function Kiosk() {
   const [card, setCard] = useState<{ paymentId: string; url: string; qr: string } | null>(null);
   const [cash, setCash] = useState<{ paymentId: string; adminName: string; emailed: boolean } | null>(null);
   const [buying, setBuying] = useState<Purchase | null>(null);
+  const [inGym, setInGym] = useState(false); // checked in during this flow
   const [done, setDone] = useState<{ title: string; detail: string; tone?: 'success' | 'info' } | null>(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -130,6 +131,7 @@ export function Kiosk() {
     setCard(null);
     setCash(null);
     setBuying(null);
+    setInGym(false);
     setDone(null);
     setError('');
     setFilter('');
@@ -174,21 +176,52 @@ export function Kiosk() {
       setStep('pick');
       return;
     }
-    if (r.result === 'limit' || (r.owes ?? 0) > 0) {
+    // Not checked in yet: ask how they want to pay (or, if allowed, pay next time).
+    if (r.result === 'limit' || r.result === 'needs_payment') {
       setStep('result');
       return;
     }
+    setInGym(true);
     const title = r.result === 'already' ? `You're already in, ${first(r.name)}` : `You're in, ${first(r.name)}!`;
+    const bal = r.balanceCents ?? 0;
     setDone({
       title,
       detail: r.pass
         ? `Covered by your ${planName(r.pass.plan).toLowerCase()} through ${ymdText(r.pass.end)}.`
         : r.result === 'already'
-          ? `Balance: ${balanceText(r.balanceCents ?? 0)}`
-          : `${money(r.feeCents ?? 0)} from your credit · balance ${balanceText(r.balanceCents ?? 0)}`,
+          ? `Balance: ${balanceText(bal)}`
+          : bal < 0
+            ? `Balance ${balanceText(bal)}. You can carry up to −${money(r.limitCents ?? 1000)}; after that you can't check in until you pay.`
+            : `${money(r.feeCents ?? 0)} from your credit · balance ${balanceText(bal)}`,
       tone: 'success',
     });
     setStep('done');
+  }
+
+  /** "Pay next time", or an allowed player who picked a payment method: check in now (balance may go negative). */
+  async function checkInDeferred(): Promise<CheckinResult | null> {
+    if (!selected) return null;
+    const r = await kiosk.checkin(selected.playerId, pin, 'defer');
+    if (r.result === 'checked_in' || r.result === 'already') setInGym(true);
+    return r;
+  }
+
+  async function payNextTime() {
+    setError('');
+    setBusy(true);
+    try {
+      const r = await checkInDeferred();
+      if (r) handleCheckin(r);
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /** Before starting a payment: allowed players are checked in right away so they never wait at the door. */
+  async function checkInIfAllowed() {
+    if (checkin?.result === 'needs_payment' && !inGym) await checkInDeferred();
   }
 
   async function submitPin(entered: string) {
@@ -208,9 +241,10 @@ export function Kiosk() {
 
   /** After a confirmed payment: blocked players get checked in automatically. */
   async function afterPaid(s: { amountCents: number; balanceCents: number; plan: Plan | null; periodLabel: string | null }) {
-    if (checkin?.result === 'limit' && selected) {
+    // Blocked players were waiting on this payment: check them in now.
+    if (checkin?.result === 'limit' && !inGym && selected) {
       try {
-        handleCheckin(await kiosk.checkin(selected.playerId, pin));
+        handleCheckin(await kiosk.checkin(selected.playerId, pin, 'defer'));
         return;
       } catch (e: any) {
         setError(e.message);
@@ -268,6 +302,7 @@ export function Kiosk() {
     setBuying(p);
     setBusy(true);
     try {
+      await checkInIfAllowed();
       const r = await kiosk.payCard(selected.playerId, pin, p.plan);
       const qr = await QRCode.toDataURL(r.checkoutUrl, { width: 360, margin: 1, color: { dark: '#16213a' } });
       setCard({ paymentId: r.paymentId, url: r.checkoutUrl, qr });
@@ -284,6 +319,7 @@ export function Kiosk() {
     setError('');
     setBusy(true);
     try {
+      await checkInIfAllowed();
       const r = await kiosk.payCash(selected.playerId, pin, admin.adminId, buying?.plan);
       setCash({ paymentId: r.paymentId, adminName: r.adminName, emailed: r.emailed });
       setStep('cashwait');
@@ -295,7 +331,10 @@ export function Kiosk() {
   }
 
   const opts = checkin?.options;
-  const backStep: Step = checkin?.result === 'limit' || (checkin?.owes ?? 0) > 0 ? 'result' : 'pay';
+  const backStep: Step = checkin?.result === 'limit' || checkin?.result === 'needs_payment' ? 'result' : 'pay';
+  // Waiting screens: blocked players are checked in once the payment clears.
+  const waitText = (what: 'paid' | 'confirmed') =>
+    inGym ? `You're checked in. Waiting for the payment` : `You'll be checked in as soon as it's ${what}`;
   const chooseCash = (p: Purchase) => {
     setBuying(p);
     setError('');
@@ -548,19 +587,32 @@ export function Kiosk() {
                 </>
               ) : (
                 <>
-                  <IconBubble tone="success"><CheckCircle2 className="size-7" /></IconBubble>
-                  <h1 className="text-2xl font-semibold tracking-tight">
-                    {checkin.result === 'already' ? `You're already in, ${first(checkin.name)}` : `You're in, ${first(checkin.name)}!`}
-                  </h1>
+                  <IconBubble tone="brand"><Banknote className="size-7" /></IconBubble>
+                  <h1 className="text-2xl font-semibold tracking-tight">How do you want to pay, {first(checkin.name)}?</h1>
                   <p className="mt-2 text-muted-foreground">
-                    You owe <span className="font-medium text-destructive">{money(checkin.owes ?? 0)}</span>. Pay now or next
-                    time. Check-in stops once you owe more than {money(checkin.limitCents ?? 0)}.
+                    Today is {money(checkin.feeCents ?? 0)}. Your balance is{' '}
+                    <span className={cn('font-medium', (checkin.balanceCents ?? 0) < 0 && 'text-destructive')}>
+                      {balanceText(checkin.balanceCents ?? 0)}
+                    </span>
+                    .
                   </p>
                 </>
               )}
               <div className="mt-8">{payChoices}</div>
-              <Button variant="ghost" size="lg" className="mt-6" onClick={reset}>
-                {checkin.result === 'limit' ? 'Cancel' : 'Pay later'}
+              {checkin.result === 'needs_payment' ? (
+                <div className="mt-6 rounded-2xl border border-dashed p-4">
+                  <Button variant="outline" size="lg" className="h-12 w-full text-base" disabled={busy} onClick={payNextTime}>
+                    {busy && <Spinner />} Pay next time
+                  </Button>
+                  <p className="mt-3 text-sm text-muted-foreground">
+                    Your balance will be{' '}
+                    <span className="font-medium text-destructive">{balanceText(checkin.balanceAfterCents ?? 0)}</span>. You can
+                    carry a balance of up to −{money(checkin.limitCents ?? 0)}; after that you can't check in until you pay.
+                  </p>
+                </div>
+              ) : null}
+              <Button variant="ghost" size="lg" className="mt-4" onClick={reset}>
+                Cancel
               </Button>
             </Centered>
           )}
@@ -612,11 +664,11 @@ export function Kiosk() {
               </p>
               <p className="mt-2 inline-flex items-center gap-2 text-sm text-muted-foreground">
                 <Spinner />
-                {checkin?.result === 'limit' ? "You'll be checked in as soon as it's confirmed" : 'Waiting for confirmation'}
+                {waitText('confirmed')}
               </p>
               <div>
                 <Button variant="ghost" size="lg" className="mt-8" onClick={reset}>
-                  Done. I'll check in later
+                  {inGym ? 'Done' : "Done. I'll check in later"}
                 </Button>
               </div>
             </Centered>
@@ -635,7 +687,7 @@ export function Kiosk() {
               </p>
               <p className="mt-2 inline-flex items-center gap-2 text-sm text-muted-foreground">
                 <Spinner />
-                {checkin?.result === 'limit' ? "You'll be checked in as soon as it's paid" : 'Waiting for payment'}
+                {waitText('paid')}
               </p>
               <div>
                 <Button variant="link" className="mt-4" render={<a href={card.url} />}>

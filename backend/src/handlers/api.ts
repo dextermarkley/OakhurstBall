@@ -119,8 +119,14 @@ async function checkInResponse(name: string, r: CheckInResult) {
     pass: passView(r.pass),
     options: await payOptions(r.pass),
   };
-  if (r.result === 'limit') {
-    return ok({ ...base, feeCents: AMOUNTS.dailyFee, needCents: r.minBalanceCents - r.balanceCents });
+  if (r.result === 'limit' || r.result === 'needs_payment') {
+    return ok({
+      ...base,
+      feeCents: AMOUNTS.dailyFee,
+      // Balance after today's fee if they defer payment.
+      balanceAfterCents: r.balanceCents - AMOUNTS.dailyFee,
+      needCents: Math.max(0, r.minBalanceCents - r.balanceCents),
+    });
   }
   return ok({ ...base, feeCents: r.feeCents });
 }
@@ -159,7 +165,13 @@ async function stripeRouter(
   // GET /api/stripe/return?session_id=cs_...  — the payer's phone lands here.
   if (path === '/api/stripe/return' && m === 'GET') {
     const sessionId = event.queryStringParameters?.session_id ?? '';
-    const s = await retrieveCheckoutSession(sessionId);
+    let s;
+    try {
+      s = await retrieveCheckoutSession(sessionId);
+    } catch (err) {
+      if (err instanceof StripeNotConfigured) throw err;
+      return notFound('payment'); // unknown or malformed session id
+    }
     const paymentId = s.metadata?.paymentId;
     if (!paymentId) return notFound('payment');
     const status = await syncCardPayment(paymentId);
@@ -253,7 +265,8 @@ async function kioskRouter(
     if (!player.pinHash || !verifySecret(String(pin), player.pinHash)) {
       return unauthorized('wrong PIN');
     }
-    const r = await sessionCheckIn(player, AMOUNTS.dailyFee, 'kiosk');
+    const { mode } = parseBody(event);
+    const r = await sessionCheckIn(player, AMOUNTS.dailyFee, 'kiosk', mode === 'defer' ? 'defer' : 'auto');
     return checkInResponse(player.name, r);
   }
 
@@ -375,7 +388,16 @@ async function apiRouter(
     ]);
     const feeCents = pass ? 0 : AMOUNTS.dailyFee;
     const minBalance = feeCents - NEGATIVE_LIMIT_CENTS;
+    // covered: pass · credit: balance pays the fee · owe: may pay next time · blocked: must pay first
+    const payState = pass
+      ? 'covered'
+      : player.balanceCents >= feeCents
+        ? 'credit'
+        : player.balanceCents >= minBalance
+          ? 'owe'
+          : 'blocked';
     return ok({
+      payState,
       session,
       checkedIn,
       balanceCents: player.balanceCents,
@@ -392,7 +414,8 @@ async function apiRouter(
   if (path === '/api/me/checkin' && m === 'POST') {
     const player = await getPlayerByCognitoSub(claims.sub);
     if (!player) return notFound('no linked player profile');
-    const r = await sessionCheckIn(player, AMOUNTS.dailyFee, 'player');
+    const { mode } = parseBody(event);
+    const r = await sessionCheckIn(player, AMOUNTS.dailyFee, 'player', mode === 'defer' ? 'defer' : 'auto');
     return checkInResponse(player.name, r);
   }
 

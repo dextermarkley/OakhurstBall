@@ -17,7 +17,8 @@ import {
   Ticket,
   Users,
 } from 'lucide-react';
-import { api, type MySession, type Plan, type PlanOffer } from '@/api';
+import { api, type CheckinResult, type MySession, type Plan, type PlanOffer } from '@/api';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { FormInput } from '@/components/form-field';
 import { StatCard } from '@/components/stat-card';
 import { Badge } from '@/components/ui/badge';
@@ -111,15 +112,44 @@ export function PlayerDashboard() {
 
 function SessionCard({ s, onChange }: { s: MySession; onChange: () => void }) {
   const [busy, setBusy] = useState(false);
+  // Set when check-in needs a payment decision first (needs_payment or limit).
+  const [ask, setAsk] = useState<CheckinResult | null>(null);
+
+  function report(r: CheckinResult) {
+    if (r.result === 'no_session') toast.error('The gym just closed.');
+    else if (r.result === 'already') toast.info("You're already checked in.");
+    else if (r.result === 'checked_in')
+      toast.success(
+        r.pass
+          ? 'Checked in. Covered by your pass.'
+          : (r.balanceCents ?? 0) < 0
+            ? `Checked in. Balance ${balanceText(r.balanceCents ?? 0)}.`
+            : `Checked in. ${money(r.feeCents ?? 0)} from your credit.`,
+      );
+  }
 
   async function checkIn() {
     setBusy(true);
     try {
-      const r = await api.myCheckin();
-      if (r.result === 'no_session') toast.error('The gym just closed.');
-      else if (r.result === 'limit') toast.error(`Pay at least ${money(r.needCents ?? 0)} to check in.`);
-      else if (r.result === 'already') toast.info("You're already checked in.");
-      else toast.success(r.pass ? 'Checked in. Covered by your pass.' : `Checked in. ${money(r.feeCents ?? 0)} charged.`);
+      const r = await api.myCheckin('auto');
+      if (r.result === 'needs_payment' || r.result === 'limit') setAsk(r);
+      else {
+        report(r);
+        onChange();
+      }
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function payNextTime() {
+    setBusy(true);
+    try {
+      const r = await api.myCheckin('defer');
+      report(r);
+      setAsk(null);
       onChange();
     } catch (e: any) {
       toast.error(e.message);
@@ -128,10 +158,12 @@ function SessionCard({ s, onChange }: { s: MySession; onChange: () => void }) {
     }
   }
 
-  async function addCredit() {
+  /** Card (credit or a pass). Allowed players are checked in first so they're never stuck at the door. */
+  async function payCard(plan?: Plan) {
     setBusy(true);
     try {
-      window.location.assign((await api.myPayCard()).checkoutUrl);
+      if (ask?.result === 'needs_payment') await api.myCheckin('defer');
+      window.location.assign((await api.myPayCard(plan)).checkoutUrl);
     } catch (e: any) {
       toast.error(e.message);
       setBusy(false);
@@ -178,21 +210,72 @@ function SessionCard({ s, onChange }: { s: MySession; onChange: () => void }) {
           <Badge className="h-9 gap-1.5 bg-success px-3 text-sm text-white">
             <CheckCircle2 className="size-4" /> You're checked in
           </Badge>
-        ) : s.canCheckIn ? (
-          <Button size="lg" className="h-11 bg-brand px-5 text-base text-brand-foreground hover:bg-brand/90" disabled={busy} onClick={checkIn}>
-            {busy && <Spinner />} {s.pass ? 'Check in · covered by pass' : `Check in · ${money(s.feeCents)}`}
-          </Button>
         ) : (
           <div className="flex flex-col gap-2 sm:items-end">
-            <div className="text-sm text-primary-foreground/80">
-              Balance too low. Pay at least {money(s.needCents)} to check in.
-            </div>
-            <Button variant="secondary" disabled={busy || !s.options.cardEnabled} onClick={addCredit}>
-              <CreditCard /> Add {money(s.options.cardCents)} credit
+            <Button size="lg" className="h-11 bg-brand px-5 text-base text-brand-foreground hover:bg-brand/90" disabled={busy} onClick={checkIn}>
+              {busy && !ask && <Spinner />}
+              {s.payState === 'covered' ? 'Check in · covered by pass' : s.payState === 'blocked' ? 'Pay to check in' : 'Check in'}
             </Button>
+            {s.payState === 'blocked' && (
+              <div className="text-sm text-primary-foreground/80">Your balance is {balanceText(s.balanceCents)}. Pay to check in.</div>
+            )}
           </div>
         )}
       </CardContent>
+
+      <Dialog open={!!ask} onOpenChange={(o) => !o && !busy && setAsk(null)}>
+        <DialogContent className="sm:max-w-md">
+          {ask && (
+            <>
+              <DialogHeader>
+                <DialogTitle>{ask.result === 'limit' ? 'Please pay to check in' : 'How do you want to pay?'}</DialogTitle>
+                <DialogDescription>
+                  {ask.result === 'limit'
+                    ? `Your balance is ${balanceText(ask.balanceCents ?? 0)}. Balances can go down to −${money(ask.limitCents ?? 0)}, so pay at least ${money(ask.needCents ?? 0)}. Then tap Check in again.`
+                    : `Today is ${money(ask.feeCents ?? 0)}. Your balance is ${balanceText(ask.balanceCents ?? 0)}.`}
+                </DialogDescription>
+              </DialogHeader>
+              <div className="space-y-2 py-2">
+                {!s.options.cardEnabled && <p className="text-sm text-muted-foreground">Card payments aren't set up yet.</p>}
+                <Button className="h-11 w-full justify-between" disabled={busy || !s.options.cardEnabled} onClick={() => payCard()}>
+                  <span className="inline-flex items-center gap-2">
+                    <CreditCard /> Add credit by card
+                  </span>
+                  <span className="tabular">{money(s.options.cardCents)}</span>
+                </Button>
+                {s.options.plans
+                  .filter((o) => o.status === 'available')
+                  .map((o) => (
+                    <Button
+                      key={o.plan}
+                      variant="outline"
+                      className="h-11 w-full justify-between"
+                      disabled={busy || !s.options.cardEnabled}
+                      onClick={() => payCard(o.plan)}
+                    >
+                      <span className="inline-flex items-center gap-2">
+                        <Ticket /> {planName(o.plan)} by card
+                      </span>
+                      <span className="tabular">{money(o.priceCents)}</span>
+                    </Button>
+                  ))}
+                <p className="pt-1 text-xs text-muted-foreground">Card, Apple Pay or Google Pay. You can also pay cash at the kiosk.</p>
+              </div>
+              {ask.result === 'needs_payment' && (
+                <div className="rounded-xl border border-dashed p-3">
+                  <Button variant="secondary" className="h-11 w-full" disabled={busy} onClick={payNextTime}>
+                    {busy && <Spinner />} Pay next time
+                  </Button>
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    Your balance will be <span className="font-medium text-destructive">{balanceText(ask.balanceAfterCents ?? 0)}</span>.
+                    You can carry a balance of up to −{money(ask.limitCents ?? 0)}; after that you can't check in until you pay.
+                  </p>
+                </div>
+              )}
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
     </Card>
   );
 }

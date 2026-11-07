@@ -203,7 +203,17 @@ export type CheckInResult =
       pass: Pass | null;
     }
   | { result: 'no_session' }
+  /** mode 'auto' only: credit doesn't cover the fee, but they may defer ("pay next time"). Not checked in. */
+  | { result: 'needs_payment'; session: Session; balanceCents: number; minBalanceCents: number; pass: null }
   | { result: 'limit'; session: Session; balanceCents: number; minBalanceCents: number; pass: null };
+
+/**
+ * 'auto'  — check in only if a pass covers the session or the balance covers the
+ *           fee; otherwise return needs_payment (allowed to defer) or limit.
+ * 'defer' — check in and let the balance go negative, down to the limit
+ *           ("pay next time", or after choosing a payment method).
+ */
+export type CheckInMode = 'auto' | 'defer';
 
 /**
  * Check a player into the open session and charge the fee, in one transaction:
@@ -217,6 +227,7 @@ export async function sessionCheckIn(
   player: { playerId: string; name: string },
   feeCents: number,
   source: 'kiosk' | 'player',
+  mode: CheckInMode = 'defer',
 ): Promise<CheckInResult> {
   const session = await currentSession();
   if (!session) return { result: 'no_session' };
@@ -225,7 +236,10 @@ export async function sessionCheckIn(
   const pass = await coveringPass(player.playerId, session.eventDate);
   if (pass) feeCents = 0;
   const at = nowIso();
-  const minBalanceCents = feeCents - NEGATIVE_LIMIT_CENTS;
+  // Lowest balance (before the fee) that may still defer payment.
+  const limitMin = feeCents - NEGATIVE_LIMIT_CENTS;
+  // In auto mode the balance must cover the fee outright.
+  const minBalanceCents = mode === 'auto' ? feeCents : limitMin;
   const balanceCondition = pass ? 'attribute_exists(PK)' : 'attribute_exists(PK) AND balanceCents >= :min';
   try {
     await ddb.send(
@@ -293,7 +307,10 @@ export async function sessionCheckIn(
     const balanceCents = (await getPlayer(player.playerId))?.balanceCents ?? 0;
     if (failed(0)) return { result: 'no_session' };
     if (failed(1)) return { result: 'already', session, feeCents: 0, balanceCents, pass };
-    if (failed(2)) return { result: 'limit', session, balanceCents, minBalanceCents, pass: null };
+    if (failed(2)) {
+      const canDefer = mode === 'auto' && balanceCents >= limitMin;
+      return { result: canDefer ? 'needs_payment' : 'limit', session, balanceCents, minBalanceCents: limitMin, pass: null };
+    }
     throw err;
   }
   const balanceCents = (await getPlayer(player.playerId))?.balanceCents ?? 0;

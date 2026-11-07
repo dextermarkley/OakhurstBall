@@ -48,6 +48,10 @@ const players = {
   p2: { id: hex(12), name: 'ZZ Test Two (blocked)', bal: -600 },
   p3: { id: hex(12), name: 'ZZ Test Three (at edge)', bal: -500 },
   p4: { id: hex(12), name: 'ZZ Test Four', bal: 0 },
+  credit: { id: hex(12), name: 'ZZ Auto Credit', bal: 1000 },
+  zero: { id: hex(12), name: 'ZZ Auto Zero', bal: 0 },
+  minus5: { id: hex(12), name: 'ZZ Auto Minus5', bal: -500 },
+  minus10: { id: hex(12), name: 'ZZ Auto Minus10', bal: -1000 },
   me: { id: hex(12), name: 'ZZ Test Admin', bal: 0 },
 };
 const email = `agent-test-${hex(4)}@oakhurst-ball.org`;
@@ -65,7 +69,8 @@ const call = async (method, path, body, headers) => {
 };
 const kiosk = (path, body) => call(body ? 'POST' : 'GET', `/api/kiosk${path}`, body, K);
 const api = (method, path, body) => call(method, `/api${path}`, body, A);
-const kioskCheckin = (p) => kiosk('/checkin', { playerId: p.id, pin: PIN });
+// 'defer' = check in now, balance may go negative (down to −$10). 'auto' = only if credit/pass covers it.
+const kioskCheckin = (p, mode = 'defer') => kiosk('/checkin', { playerId: p.id, pin: PIN, mode });
 const balance = async (p) =>
   (await ddb.send(new GetCommand({ TableName: TABLE, Key: { PK: `PLAYER#${p.id}`, SK: 'PROFILE' } }))).Item?.balanceCents;
 
@@ -135,8 +140,12 @@ try {
   // ── player page ──
   r = await api('GET', '/me/session');
   check('player page: open session, can check in', r.body.session?.sessionId === sid && r.body.canCheckIn && !r.body.checkedIn, r.body);
-  r = await api('POST', '/me/checkin');
-  check('player page check-in: $5 charged', r.body.result === 'checked_in' && r.body.balanceCents === -500, r.body);
+  check('player page: $0 balance → payState owe', r.body.payState === 'owe', r.body.payState);
+  r = await api('POST', '/me/checkin', { mode: 'auto' });
+  check('player page check-in at $0 asks to pay first (not checked in)', r.body.result === 'needs_payment' && r.body.balanceAfterCents === -500, r.body);
+  check('player page: no charge yet', (await balance(players.me)) === 0);
+  r = await api('POST', '/me/checkin', { mode: 'defer' });
+  check('player page "pay next time": checked in, $5 charged', r.body.result === 'checked_in' && r.body.balanceCents === -500, r.body);
   r = await api('GET', '/me/session');
   check('player page: now shows checked in', r.body.checkedIn === true && r.body.canCheckIn === false, r.body);
 
@@ -159,6 +168,24 @@ try {
   r = await api('GET', `/admin/sessions/${sid}`);
   check('admin detail: 3 attendees incl. one from the player page',
     r.body.attendees?.length === 3 && r.body.attendees.some((a) => a.source === 'player'), r.body.attendees);
+
+  // ── ask-to-pay rules (the kiosk's default 'auto' check-in) ──
+  r = await kioskCheckin(players.credit, 'auto');
+  check('$10 credit: checked in straight away, $5 from credit', r.body.result === 'checked_in' && r.body.balanceCents === 500, r.body);
+  r = await kioskCheckin(players.zero, 'auto');
+  check('$0: asked to pay, may pay next time, not checked in', r.body.result === 'needs_payment' && r.body.balanceAfterCents === -500, r.body);
+  check('$0: nothing charged yet', (await balance(players.zero)) === 0);
+  r = await kioskCheckin(players.minus5, 'auto');
+  check('−$5: asked to pay, may pay next time', r.body.result === 'needs_payment' && r.body.balanceAfterCents === -1000, r.body);
+  r = await kioskCheckin(players.minus5, 'defer');
+  check('−$5 "pay next time": checked in at −$10', r.body.result === 'checked_in' && r.body.balanceCents === -1000, r.body);
+  r = await kioskCheckin(players.minus10, 'auto');
+  check('−$10: must pay first', r.body.result === 'limit' && r.body.needCents === 500, r.body);
+  r = await kioskCheckin(players.minus10, 'defer');
+  check('−$10: "pay next time" is refused too', r.body.result === 'limit', r.body);
+  check('−$10: balance unchanged', (await balance(players.minus10)) === -1000);
+  r = await kiosk('/checkin', { playerId: players.zero.id, pin: PIN });
+  check('kiosk with no mode defaults to asking first', r.body.result === 'needs_payment', r.body);
 
   // ── automatic close after the time limit ──
   const past = new Date(Date.now() - 60_000).toISOString();

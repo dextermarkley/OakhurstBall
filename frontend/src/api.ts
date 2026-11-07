@@ -136,8 +136,12 @@ export const api = {
   async mySession() {
     return req<MySession>('/api/me/session', { headers: await authHeaders() });
   },
-  async myCheckin() {
-    return req<CheckinResult>('/api/me/checkin', { method: 'POST', headers: await authHeaders() });
+  async myCheckin(mode: CheckinMode = 'auto') {
+    return req<CheckinResult>('/api/me/checkin', {
+      method: 'POST',
+      headers: await authHeaders(),
+      body: JSON.stringify({ mode }),
+    });
   },
   async myPayCard(plan?: Plan) {
     return req<{ paymentId: string; checkoutUrl: string }>('/api/me/pay-card', {
@@ -207,9 +211,13 @@ export interface MySession {
   limitCents: number;
   pass: PassView | null;
   canCheckIn: boolean;
+  /** covered: pass · credit: balance pays the fee · owe: may pay next time · blocked: must pay first */
+  payState: 'covered' | 'credit' | 'owe' | 'blocked';
   needCents: number;
   options: PayOptions;
 }
+
+export type CheckinMode = 'auto' | 'defer';
 
 // ── Kiosk (device token) ──
 function kioskHeaders(): Record<string, string> {
@@ -240,10 +248,10 @@ export const kiosk = {
       kioskHeaders(),
     );
   },
-  async checkin(playerId: string, pin: string) {
+  async checkin(playerId: string, pin: string, mode: CheckinMode = 'auto') {
     return req<CheckinResult>(
       '/api/kiosk/checkin',
-      { method: 'POST', body: JSON.stringify({ playerId, pin }) },
+      { method: 'POST', body: JSON.stringify({ playerId, pin, mode }) },
       kioskHeaders(),
     );
   },
@@ -277,14 +285,18 @@ export const kiosk = {
 };
 
 /**
- * checked_in / already: in the session. limit: balance too low, pay first
- * (needCents = how much brings them back within the limit). no_session: gym closed.
+ * checked_in / already: in the session.
+ * needs_payment: not checked in yet; credit doesn't cover the fee but they may
+ *   pay next time (check in again with mode 'defer').
+ * limit: would go past the negative limit; must pay first (needCents).
+ * no_session: gym closed.
  */
 export interface CheckinResult {
-  result: 'checked_in' | 'already' | 'limit' | 'no_session';
+  result: 'checked_in' | 'already' | 'needs_payment' | 'limit' | 'no_session';
   name: string;
   feeCents?: number;
   balanceCents?: number;
+  balanceAfterCents?: number;
   owes?: number;
   needCents?: number;
   limitCents?: number;

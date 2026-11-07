@@ -34,6 +34,14 @@ Items: `PLAYER#<pid> / PASS#<periodId>` (periodId `Q2026-3` or `Y2026`), with
 - A session closes when an admin closes it or 5 hours after it opened
   (`SESSION_HOURS`). The time limit needs no scheduler: a session is "open" only
   while `closesAt` is in the future.
+- **Paying at check-in.** A pass holder, or anyone whose credit covers the $5, is
+  checked in straight away. Anyone else is asked how they want to pay first:
+  - balance $0 down to −$5: they can pay (card, cash or a pass) or tap **Pay next time**;
+    either way they're checked in and can carry a balance of up to −$10.
+  - balance below −$5 (the fee would pass −$10): they must pay first; the kiosk checks
+    them in once the payment clears.
+  API: check-in takes `mode` — `auto` (default; returns `needs_payment` or `limit`
+  instead of charging) or `defer` ("pay next time").
 - **Check-in charges $5 once per session.** The attendee row, the session's
   attendee count, the balance debit and the player's history row are written in one
   DynamoDB transaction, so a second check-in in the same session charges nothing.
