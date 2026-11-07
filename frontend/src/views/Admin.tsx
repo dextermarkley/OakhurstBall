@@ -64,12 +64,13 @@ import { pairingUrl } from '@/pairing';
 import { AuthGate } from './AuthGate';
 import { StatusBadge } from './PlayerDashboard';
 import { AnnounceAdminCard } from '@/components/announcement';
+import { ExpensesTab } from './ExpensesTab';
 
 export function Admin() {
   return <AuthGate>{(signOut) => <AdminInner signOut={signOut} />}</AuthGate>;
 }
 
-type TabId = 'overview' | 'sessions' | 'players' | 'payments' | 'admins' | 'kiosks';
+type TabId = 'overview' | 'sessions' | 'players' | 'payments' | 'expenses' | 'admins' | 'kiosks';
 
 function AdminInner({ signOut }: { signOut: () => void }) {
   const [me, setMe] = useState<any>(null);
@@ -115,6 +116,7 @@ function AdminInner({ signOut }: { signOut: () => void }) {
               <TabsTrigger value="sessions">Sessions</TabsTrigger>
               <TabsTrigger value="players">Players</TabsTrigger>
               <TabsTrigger value="payments">Payments</TabsTrigger>
+              <TabsTrigger value="expenses">Expenses</TabsTrigger>
               <TabsTrigger value="admins">Admins</TabsTrigger>
               <TabsTrigger value="kiosks">iPads</TabsTrigger>
             </TabsList>
@@ -130,6 +132,9 @@ function AdminInner({ signOut }: { signOut: () => void }) {
           </TabsContent>
           <TabsContent value="payments">
             <PaymentsTab />
+          </TabsContent>
+          <TabsContent value="expenses">
+            <ExpensesTab />
           </TabsContent>
           <TabsContent value="admins">
             <AdminsTab />

@@ -124,3 +124,31 @@ test('offers: year shown in Q1, hidden after; quarter always (unless owned)', ()
   const yPass: any = { plan: 'year', periodId: 'Y2026' };
   assert.equal(purchasable(yPass, '2026-05-01').find((o) => o.plan === 'year')!.status, 'owned');
 });
+
+// ── Expenses: input validation + season range ──
+import { checkExpense, seasonRange, seasonLabel } from '../src/lib/expenses.js';
+
+test('expense: a normal facility payment is accepted and the note is tidied', () => {
+  const r = checkExpense({ date: '2026-11-01', category: 'facility', amountCents: 25000, note: '  Nov   court rental ' }, '2026-11-07');
+  assert.deepEqual(r.input, { date: '2026-11-01', category: 'facility', amountCents: 25000, note: 'Nov court rental' });
+});
+
+test('expense: bad input is rejected', () => {
+  const today = '2026-11-07';
+  const ok = { date: '2026-11-01', category: 'basketballs', amountCents: 6000 };
+  assert.ok(checkExpense({ ...ok, date: '2026-02-30' }, today).error, 'not a real date');
+  assert.ok(checkExpense({ ...ok, date: '11/01/2026' }, today).error, 'wrong format');
+  assert.ok(checkExpense({ ...ok, date: '2027-01-15' }, today).error, 'more than a month ahead');
+  assert.ok(checkExpense({ ...ok, category: 'snacks' }, today).error, 'unknown category');
+  assert.ok(checkExpense({ ...ok, amountCents: 0 }, today).error, 'zero');
+  assert.ok(checkExpense({ ...ok, amountCents: -500 }, today).error, 'negative');
+  assert.ok(checkExpense({ ...ok, amountCents: 12.5 }, today).error, 'fractional cents');
+  assert.ok(checkExpense({ ...ok, amountCents: 10_000_001 }, today).error, 'over $100k');
+  assert.ok(checkExpense({ ...ok, note: 'x'.repeat(201) }, today).error, 'note too long');
+  assert.equal(checkExpense({ ...ok }, today).error, undefined);
+});
+
+test('expense seasons run Apr 1 – Mar 31', () => {
+  assert.deepEqual(seasonRange(2026), { start: '2026-04-01', end: '2027-03-31' });
+  assert.equal(seasonLabel(2026), '2026–27 season');
+});

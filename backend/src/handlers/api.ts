@@ -33,6 +33,7 @@ import {
   createKiosk,
   listKiosks,
   deleteKiosk,
+  clubDate,
   listAdminsDetailed,
   setAdminEmail,
 } from '../lib/repo.js';
@@ -81,6 +82,7 @@ import {
   toUser,
   vapidPublicKey,
 } from '../lib/push.js';
+import { addExpense, checkExpense, deleteExpense, expenseReport, updateExpense } from '../lib/expenses.js';
 import {
   DEFAULT_ANNOUNCEMENT,
   cleanText,
@@ -770,6 +772,33 @@ async function apiRouter(
         autoClosed: !s.closedAt && s.closesAt <= now,
       })),
     });
+  }
+
+  // ── Expenses (admin) ──
+  // GET  /api/admin/expenses?season=2026   season report (default: current season)
+  // POST /api/admin/expenses {date, category, amountCents, note?}
+  // POST /api/admin/expenses/update {cursor, date, category, amountCents, note?}
+  // POST /api/admin/expenses/delete {cursor}
+  if (path === '/api/admin/expenses' && m === 'GET') {
+    const s = event.queryStringParameters?.season;
+    if (s != null && !/^20\d\d$/.test(s)) return badRequest('season must be a year like 2026');
+    return ok(await expenseReport(s ? Number(s) : undefined));
+  }
+  if (path === '/api/admin/expenses' && m === 'POST') {
+    const { input, error } = checkExpense(parseBody(event), clubDate());
+    if (error) return badRequest(error);
+    return created({ expense: await addExpense(input!, { sub: claims.sub, name: claims.name || claims.email || 'Admin' }) });
+  }
+  if (path === '/api/admin/expenses/update' && m === 'POST') {
+    const b = parseBody(event);
+    const { input, error } = checkExpense(b, clubDate());
+    if (error) return badRequest(error);
+    const e = await updateExpense(String(b.cursor ?? ''), input!);
+    return e ? ok({ expense: e }) : notFound('expense');
+  }
+  if (path === '/api/admin/expenses/delete' && m === 'POST') {
+    const { cursor } = parseBody(event);
+    return (await deleteExpense(String(cursor ?? ''))) ? ok({ deleted: true }) : notFound('expense');
   }
 
   // ── Announcement (admin) ──

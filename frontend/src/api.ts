@@ -212,6 +212,23 @@ export const api = {
       { headers: await authHeaders() },
     );
   },
+  // expenses
+  async expenses(season?: number) {
+    return req<ExpenseReport>(`/api/admin/expenses${season ? `?season=${season}` : ''}`, { headers: await authHeaders() });
+  },
+  async addExpense(e: ExpenseInput) {
+    return req<{ expense: Expense }>('/api/admin/expenses', { method: 'POST', headers: await authHeaders(), body: JSON.stringify(e) });
+  },
+  async updateExpense(cursor: string, e: ExpenseInput) {
+    return req<{ expense: Expense }>('/api/admin/expenses/update', {
+      method: 'POST',
+      headers: await authHeaders(),
+      body: JSON.stringify({ cursor, ...e }),
+    });
+  },
+  async deleteExpense(cursor: string) {
+    return req('/api/admin/expenses/delete', { method: 'POST', headers: await authHeaders(), body: JSON.stringify({ cursor }) });
+  },
   async deleteKiosk(deviceId: string) {
     return req<{ removed: boolean }>(`/api/admin/kiosks/${encodeURIComponent(deviceId)}`, {
       method: 'DELETE',
@@ -279,6 +296,33 @@ export const api = {
     });
   },
 };
+
+export type ExpenseCategory = 'basketballs' | 'insurance' | 'facility' | 'other';
+export interface ExpenseInput {
+  date: string;
+  category: ExpenseCategory;
+  amountCents: number;
+  note?: string;
+}
+export interface Expense extends ExpenseInput {
+  expenseId: string;
+  cursor: string;
+  createdByName: string;
+  createdAt: string;
+  updatedAt: string;
+}
+export interface ExpenseReport {
+  season: { year: number; label: string; start: string; end: string; current: boolean };
+  seasons: Array<{ year: number; label: string }>;
+  today: string;
+  expenses: Expense[];
+  totalCents: number;
+  byCategory: Record<ExpenseCategory, number>;
+  incomeCents: number;
+  monthCents: number;
+  facilityThisMonth: boolean | null;
+  lastAmounts: Partial<Record<ExpenseCategory, number>>;
+}
 
 export type RsvpStatus = 'in' | 'out';
 export interface Rsvp {

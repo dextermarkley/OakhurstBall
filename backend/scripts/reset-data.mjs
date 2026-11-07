@@ -6,7 +6,8 @@
 //          Cognito user — except the kept admin(s).
 // Keeps:   the kept admins' Cognito login, admin group membership, admin record
 //          (cash-confirm email), their player profile and kiosk PIN (balance → $0),
-//          and paired iPads (use --include-kiosks to un-pair them too).
+//          paired iPads (use --include-kiosks to un-pair them too), and recorded
+//          expenses (use --include-expenses to delete those too).
 // Not touched: Stripe keys (SSM), SES email setup, the domain, Stripe's own records.
 //
 // Dry run by default — prints what it would do. Add --yes to actually delete.
@@ -30,6 +31,7 @@ const POOL = process.env.USER_POOL_ID ?? 'us-west-2_sgaAJES20';
 const args = process.argv.slice(2);
 const apply = args.includes('--yes');
 const includeKiosks = args.includes('--include-kiosks');
+const includeExpenses = args.includes('--include-expenses');
 const keepEmails = new Set(['dextermarkley@gmail.com']);
 args.forEach((a, i) => a === '--keep' && args[i + 1] && keepEmails.add(args[i + 1].toLowerCase()));
 
@@ -67,7 +69,8 @@ const keptPlayerIds = new Set(
 const keep = (i) =>
   (i.PK.startsWith('PLAYER#') && i.SK === 'PROFILE' && keptPlayerIds.has(i.playerId)) ||
   (i.PK.startsWith('ADMIN#') && keepEmails.has((i.email ?? '').toLowerCase())) ||
-  (i.PK.startsWith('KIOSK#') && !includeKiosks);
+  (i.PK.startsWith('KIOSK#') && !includeKiosks) ||
+  (i.PK === 'EXPENSE' && !includeExpenses); // the club's books: kept unless asked
 const kept = items.filter(keep);
 const drop = items.filter((i) => !keep(i));
 
