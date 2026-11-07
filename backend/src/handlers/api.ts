@@ -439,6 +439,36 @@ async function apiRouter(
     return created({ paymentId: payment.paymentId, amountCents: payment.amountCents, checkoutUrl });
   }
 
+  // GET /api/me/admins — who a player can hand cash to
+  if (path === '/api/me/admins' && m === 'GET') {
+    return ok({ admins: await listAdmins() });
+  }
+
+  // POST /api/me/pay-cash { adminId, plan? } — cash from the player page; the
+  // chosen admin confirms by email (or on the Admin page), same as the kiosk.
+  if (path === '/api/me/pay-cash' && m === 'POST') {
+    const player = await getPlayerByCognitoSub(claims.sub);
+    if (!player) return notFound('no linked player profile');
+    const { adminId, plan: rawPlan } = parseBody(event);
+    if (rawPlan != null && !isPlan(rawPlan)) return badRequest("plan must be 'quarter' or 'year'");
+    const plan = (rawPlan ?? undefined) as Plan | undefined;
+    if (!adminId) return badRequest('adminId required');
+    const adm = await getAdmin(String(adminId));
+    if (!adm || !adm.active) return notFound('admin');
+    if (plan) {
+      const blocked = await planBlocked(player.playerId, plan);
+      if (blocked) return json(409, { error: blocked });
+    }
+    const { payment, emailed } = await createCashPayment({
+      playerId: player.playerId,
+      playerName: player.name,
+      adminId: adm.adminId,
+      adminEmail: adm.email,
+      plan,
+    });
+    return created({ paymentId: payment.paymentId, amountCents: payment.amountCents, adminName: adm.name, emailed });
+  }
+
   // POST /api/me/pin  { pin }  — player sets their own kiosk PIN
   if (path === '/api/me/pin' && m === 'POST') {
     const { pin } = parseBody(event);

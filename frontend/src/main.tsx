@@ -8,6 +8,7 @@ import { ConfirmProvider } from '@/components/confirm';
 import { Toaster } from '@/components/ui/sonner';
 import { Spinner } from '@/components/ui/spinner';
 import { registerServiceWorker } from '@/pwa';
+import { UpdateBanner } from '@/components/update-banner';
 
 Amplify.configure({
   Auth: { Cognito: { userPoolId: config.userPoolId, userPoolClientId: config.userPoolClientId } },
@@ -25,6 +26,7 @@ const page = (load: () => Promise<Record<string, unknown>>, name: string) => {
       }
     >
       <C />
+      <UpdateBanner />
     </Suspense>
   );
 };

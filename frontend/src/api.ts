@@ -150,6 +150,16 @@ export const api = {
       body: JSON.stringify(plan ? { plan } : {}),
     });
   },
+  async myAdmins() {
+    return req<{ admins: Array<{ adminId: string; name: string }> }>('/api/me/admins', { headers: await authHeaders() });
+  },
+  async myPayCash(adminId: string, plan?: Plan) {
+    return req<{ paymentId: string; amountCents: number; adminName: string; emailed: boolean }>('/api/me/pay-cash', {
+      method: 'POST',
+      headers: await authHeaders(),
+      body: JSON.stringify({ adminId, plan }),
+    });
+  },
   async grantPass(playerId: string, plan: Plan) {
     return req<{ pass: PassView; refundedCents: number }>(`/api/admin/players/${playerId}/pass`, {
       method: 'POST',

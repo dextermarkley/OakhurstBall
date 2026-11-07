@@ -36,6 +36,7 @@ import { Spinner } from '@/components/ui/spinner';
 import { balanceText, initials, money, planName, timeOf, ymdText } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import { clearPairing, parsePairing, savePairing } from '@/pairing';
+import { APP_VERSION, applyUpdate, useUpdateReady } from '@/pwa';
 
 // Loaded only when the Scan button is tapped (keeps jsQR out of the main bundle).
 const QrScanner = lazy(() => import('./QrScanner').then((m) => ({ default: m.QrScanner })));
@@ -80,6 +81,12 @@ export function Kiosk() {
   const [cash, setCash] = useState<{ paymentId: string; adminName: string; emailed: boolean } | null>(null);
   const [buying, setBuying] = useState<Purchase | null>(null);
   const [inGym, setInGym] = useState(false); // checked in during this flow
+
+  // Unattended iPad: take a new version as soon as nobody is mid-check-in.
+  const updateReady = useUpdateReady();
+  useEffect(() => {
+    if (updateReady && (step === 'pick' || step === 'provision')) applyUpdate();
+  }, [updateReady, step]);
   const [done, setDone] = useState<{ title: string; detail: string; tone?: 'success' | 'info' } | null>(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -488,6 +495,7 @@ export function Kiosk() {
               </div>
               <div className="mt-6 hidden items-center gap-2 text-xs text-primary-foreground/50 lg:flex">
                 <NegDot /> Balance below $0
+                <span className="ml-auto">v{APP_VERSION}</span>
               </div>
             </>
           ) : (

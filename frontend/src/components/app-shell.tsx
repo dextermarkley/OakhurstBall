@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
-import { LogOut, Repeat } from 'lucide-react';
+import { LogOut, RefreshCw, Repeat } from 'lucide-react';
+import { APP_VERSION, applyUpdate, useUpdateReady } from '@/pwa';
 import { Logo } from '@/components/brand';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
@@ -55,6 +56,7 @@ export function AppShell({
 }
 
 function UserMenu({ user, onSignOut }: { user: ShellUser; onSignOut: () => void }) {
+  const updateReady = useUpdateReady();
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
@@ -91,6 +93,15 @@ function UserMenu({ user, onSignOut }: { user: ShellUser; onSignOut: () => void 
         <DropdownMenuItem onClick={onSignOut}>
           <LogOut /> Sign out
         </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        {updateReady ? (
+          <DropdownMenuItem onClick={applyUpdate}>
+            <RefreshCw /> Update to the new version
+          </DropdownMenuItem>
+        ) : null}
+        <DropdownMenuGroup>
+          <DropdownMenuLabel className="text-[11px] font-normal">Version {APP_VERSION}</DropdownMenuLabel>
+        </DropdownMenuGroup>
       </DropdownMenuContent>
     </DropdownMenu>
   );

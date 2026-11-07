@@ -1,16 +1,29 @@
-// Service worker registration.
+// Service worker + "update available".
 //
-// A phone or iPad can keep the app open (or resume an installed app) for days, so
-// "check on page load" isn't enough: a stale bundle once misread a new API reply.
-// We check for a new version whenever the app comes back to the foreground and
-// every 15 minutes, and reload onto it as soon as it's installed
-// (registerType: autoUpdate → the new worker takes control and the page reloads).
+// The app checks for a new version on load, whenever it comes back to the
+// foreground, and every 15 minutes. When one is downloaded it does NOT reload on
+// its own (that could interrupt someone mid-payment); instead an "Update" button
+// appears (UpdateBanner). The unattended kiosk applies it itself the next time
+// it's back on its name list.
+import { useSyncExternalStore } from 'react';
 import { registerSW } from 'virtual:pwa-register';
+
+/** Build stamp, e.g. "2026.11.07-1432 · 0038ab6" (set in vite.config.ts). */
+export const APP_VERSION: string = __APP_VERSION__;
+
+let ready = false;
+let apply: ((reload?: boolean) => Promise<void>) | null = null;
+const listeners = new Set<() => void>();
+const emit = () => listeners.forEach((l) => l());
 
 export function registerServiceWorker() {
   if (!('serviceWorker' in navigator) || import.meta.env.DEV) return;
-  registerSW({
+  apply = registerSW({
     immediate: true,
+    onNeedRefresh() {
+      ready = true;
+      emit();
+    },
     onRegisteredSW(_url, reg) {
       if (!reg) return;
       const check = () => reg.update().catch(() => {});
@@ -21,4 +34,21 @@ export function registerServiceWorker() {
       window.addEventListener('focus', check);
     },
   });
+}
+
+/** Switch to the downloaded version and reload. */
+export function applyUpdate() {
+  if (apply) apply(true);
+  else window.location.reload();
+}
+
+/** True once a new version is downloaded and waiting. */
+export function useUpdateReady(): boolean {
+  return useSyncExternalStore(
+    (l) => {
+      listeners.add(l);
+      return () => listeners.delete(l);
+    },
+    () => ready,
+  );
 }
