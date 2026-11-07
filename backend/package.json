@@ -1,0 +1,23 @@
+{
+  "name": "oakhurst-backend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "esbuild test/pure.test.ts --bundle --platform=node --format=esm '--external:@aws-sdk/*' --outfile=test/.pure.test.mjs --log-level=error && node --test test/.pure.test.mjs"
+  },
+  "dependencies": {
+    "@aws-sdk/client-dynamodb": "^3.670.0",
+    "@aws-sdk/client-sesv2": "^3.1162.0",
+    "@aws-sdk/client-ssm": "^3.1162.0",
+    "@aws-sdk/lib-dynamodb": "^3.670.0"
+  },
+  "devDependencies": {
+    "@aws-sdk/client-cognito-identity-provider": "^3.1164.0",
+    "@types/aws-lambda": "^8.10.145",
+    "@types/node": "^20.14.0",
+    "esbuild": "^0.28.2",
+    "typescript": "^5.5.0"
+  }
+}

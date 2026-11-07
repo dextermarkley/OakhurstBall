@@ -1,0 +1,27 @@
+{
+  "name": "oakhurst-infra",
+  "version": "0.1.0",
+  "private": true,
+  "bin": {
+    "oakhurst": "bin/oakhurst.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "synth": "cdk synth",
+    "deploy": "cdk deploy",
+    "diff": "cdk diff",
+    "bootstrap": "cdk bootstrap"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "aws-cdk": "2.1147.0",
+    "esbuild": "^0.28.2",
+    "source-map-support": "^0.5.21",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.5.0"
+  },
+  "dependencies": {
+    "aws-cdk-lib": "2.275.0",
+    "constructs": "^10.8.1"
+  }
+}
