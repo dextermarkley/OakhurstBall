@@ -73,6 +73,14 @@ import {
 } from '../lib/sessions.js';
 import { isPlan, type Plan } from '../lib/plans.js';
 import {
+  checkSubscription,
+  deleteSubscription,
+  saveSubscription,
+  sendPush,
+  toUser,
+  vapidPublicKey,
+} from '../lib/push.js';
+import {
   coveringPass,
   purchasable,
   currentPassHolders,
@@ -469,6 +477,44 @@ async function apiRouter(
     return created({ paymentId: payment.paymentId, amountCents: payment.amountCents, adminName: adm.name, emailed });
   }
 
+  // ── Notifications (Web Push) ──
+  // GET    /api/me/push              → { publicKey }  (VAPID key for pushManager.subscribe)
+  // POST   /api/me/push { subscription }  register this device (idempotent)
+  // DELETE /api/me/push { endpoint }      unregister (sign-out / turn off)
+  // POST   /api/me/push/test              send a test to the caller's devices
+  if (path === '/api/me/push' && m === 'GET') {
+    const publicKey = await vapidPublicKey();
+    if (!publicKey) return json(503, { error: 'Notifications are not set up yet' });
+    return ok({ publicKey });
+  }
+  if (path === '/api/me/push' && m === 'POST') {
+    const { subscription } = parseBody(event);
+    const bad = checkSubscription(subscription);
+    if (bad) return badRequest(bad);
+    const player = await getPlayerByCognitoSub(claims.sub);
+    await saveSubscription(subscription, {
+      sub: claims.sub,
+      email: claims.email,
+      playerId: player?.playerId,
+      isAdmin: admin,
+    });
+    return ok({ subscribed: true });
+  }
+  if (path === '/api/me/push' && m === 'DELETE') {
+    const { endpoint } = parseBody(event);
+    if (!endpoint) return badRequest('endpoint required');
+    return ok({ removed: await deleteSubscription(String(endpoint), claims.sub) });
+  }
+  if (path === '/api/me/push/test' && m === 'POST') {
+    const r = await sendPush(toUser(claims.sub), {
+      title: 'Notifications are on',
+      body: "You'll hear from Oakhurst Basketball when the gym opens and when payments go through.",
+      url: admin ? '/admin' : '/player',
+      tag: 'test',
+    });
+    return ok(r);
+  }
+
   // POST /api/me/pin  { pin }  — player sets their own kiosk PIN
   if (path === '/api/me/pin' && m === 'POST') {
     const { pin } = parseBody(event);
@@ -594,6 +640,18 @@ async function apiRouter(
   if (path === '/api/admin/sessions' && m === 'POST') {
     const s = await openSession(claims.name || claims.email || 'Admin');
     if (!s) return json(409, { error: 'A session is already open' });
+    const until = new Intl.DateTimeFormat('en-US', {
+      timeZone: process.env.CLUB_TZ ?? 'America/Los_Angeles',
+      hour: 'numeric',
+      minute: '2-digit',
+    }).format(new Date(s.closesAt));
+    // Everyone with notifications on, except whoever just opened it.
+    await sendPush((d) => d.sub !== claims.sub, {
+      title: 'The gym is open',
+      body: `Pickup is on until ${until}. Check in when you get there.`,
+      url: '/player',
+      tag: 'gym-open',
+    }, { ttlSeconds: 2 * 3600 });
     return created({ session: s });
   }
 

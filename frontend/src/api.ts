@@ -43,6 +43,27 @@ export const api = {
   async myBalance() {
     return req<any>('/api/me/balance', { headers: await authHeaders() });
   },
+  // notifications (Web Push)
+  async pushKey() {
+    return req<{ publicKey: string }>('/api/me/push', { headers: await authHeaders() });
+  },
+  async pushSubscribe(subscription: PushSubscriptionJSON) {
+    return req<{ subscribed: boolean }>('/api/me/push', {
+      method: 'POST',
+      headers: await authHeaders(),
+      body: JSON.stringify({ subscription }),
+    });
+  },
+  async pushUnsubscribe(endpoint: string) {
+    return req<{ removed: boolean }>('/api/me/push', {
+      method: 'DELETE',
+      headers: await authHeaders(),
+      body: JSON.stringify({ endpoint }),
+    });
+  },
+  async pushTest() {
+    return req<{ sent: number; failed: number }>('/api/me/push/test', { method: 'POST', headers: await authHeaders() });
+  },
   async setPin(pin: string) {
     return req('/api/me/pin', {
       method: 'POST',

@@ -57,6 +57,7 @@ export default defineConfig({
         navigateFallback: '/index.html',
         navigateFallbackDenylist: [/^\/api\//],
         cleanupOutdatedCaches: true,
+        importScripts: ['/push-sw.js'], // push + notification-click handlers
         runtimeCaching: [
           { urlPattern: ({ url }) => url.pathname.startsWith('/api/'), handler: 'NetworkOnly' },
           { urlPattern: ({ url }) => url.pathname === '/config.js', handler: 'NetworkFirst', options: { cacheName: 'runtime-config' } },

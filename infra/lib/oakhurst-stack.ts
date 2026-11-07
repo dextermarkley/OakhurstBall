@@ -251,6 +251,17 @@ export class OakhurstStack extends cdk.Stack {
       }),
     );
 
+    // Web Push VAPID keys (also created outside CDK; see docs/notifications.md).
+    // Both functions settle payments, and settling notifies the player.
+    for (const fn of [apiFn, confirmFn]) {
+      fn.addToRolePolicy(
+        new iam.PolicyStatement({
+          actions: ['ssm:GetParameter'],
+          resources: [`arn:aws:ssm:${this.region}:${this.account}:parameter/oakhurst/push/*`],
+        }),
+      );
+    }
+
     // ───────────────────────── Email (SES) ─────────────────────────────────
     // Cash-confirm links go out by email. The domain is verified in SES through
     // DKIM CNAMEs in the Route 53 zone; a custom MAIL FROM (bounce.<apex>) aligns

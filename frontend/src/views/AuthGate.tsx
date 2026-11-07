@@ -14,6 +14,7 @@ import { Field, FieldError, FieldGroup, FieldLabel } from '@/components/ui/field
 import { InputOTP, InputOTPGroup, InputOTPSlot } from '@/components/ui/input-otp';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Spinner } from '@/components/ui/spinner';
+import { disableNotifications } from '@/notifications';
 
 type Mode = 'signin' | 'signup' | 'confirm';
 
@@ -39,7 +40,13 @@ export function AuthGate({ children }: { children: (signOut: () => void) => Reac
     getCurrentUser().then(() => setAuthed(true)).catch(() => setAuthed(false));
   }, []);
 
-  const doSignOut = () => signOut().then(() => setAuthed(false));
+  // Unregister this device first (needs the token), so the next person to sign in
+  // here doesn't get the previous user's notifications.
+  const doSignOut = () =>
+    disableNotifications()
+      .catch(() => {})
+      .then(() => signOut())
+      .then(() => setAuthed(false));
 
   if (authed === null) {
     return (

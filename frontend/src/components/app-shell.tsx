@@ -1,7 +1,9 @@
-import type { ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
-import { LogOut, RefreshCw, Repeat } from 'lucide-react';
+import { Bell, BellOff, LogOut, RefreshCw, Repeat } from 'lucide-react';
 import { APP_VERSION, applyUpdate, useUpdateReady } from '@/pwa';
+import { setSignedIn, useNotifications, useNotifyBarVisible } from '@/notifications';
+import { NotifyBar, NotifyHelpDialog } from '@/components/notify-bar';
 import { Logo } from '@/components/brand';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
@@ -37,6 +39,13 @@ export function AppShell({
   children: ReactNode;
   wide?: boolean;
 }) {
+  const signedIn = !!(user && onSignOut);
+  const barVisible = useNotifyBarVisible();
+  useEffect(() => {
+    if (!signedIn) return;
+    setSignedIn(true);
+    return () => setSignedIn(false);
+  }, [signedIn]);
   return (
     <div className="min-h-dvh bg-background">
       <header className="safe-top sticky top-0 z-30 border-b bg-background/85 backdrop-blur supports-[backdrop-filter]:bg-background/70">
@@ -48,16 +57,27 @@ export function AppShell({
           {user && onSignOut && <UserMenu user={user} onSignOut={onSignOut} />}
         </div>
       </header>
-      <main className={cn('safe-bottom mx-auto px-4 py-6 sm:px-6 sm:py-8', wide ? 'max-w-7xl' : 'max-w-5xl')}>
+      <main
+        className={cn(
+          'safe-bottom mx-auto px-4 py-6 sm:px-6 sm:py-8',
+          wide ? 'max-w-7xl' : 'max-w-5xl',
+          barVisible && 'pb-40 sm:pb-28', // room for the notifications bar
+        )}
+      >
         {children}
       </main>
+      {signedIn && <NotifyBar isAdmin={user?.isAdmin} />}
     </div>
   );
 }
 
 function UserMenu({ user, onSignOut }: { user: ShellUser; onSignOut: () => void }) {
   const updateReady = useUpdateReady();
+  const n = useNotifications();
+  const [help, setHelp] = useState(false);
   return (
+    <>
+    <NotifyHelpDialog open={help} onClose={() => setHelp(false)} isAdmin={user.isAdmin} />
     <DropdownMenu>
       <DropdownMenuTrigger
         render={
@@ -90,6 +110,12 @@ function UserMenu({ user, onSignOut }: { user: ShellUser; onSignOut: () => void 
             <DropdownMenuSeparator />
           </>
         )}
+        {n.supported && (
+          <DropdownMenuItem onClick={() => setHelp(true)}>
+            {n.subscribed ? <Bell /> : <BellOff />}
+            {n.subscribed ? 'Notifications on' : 'Turn on notifications'}
+          </DropdownMenuItem>
+        )}
         <DropdownMenuItem onClick={onSignOut}>
           <LogOut /> Sign out
         </DropdownMenuItem>
@@ -104,6 +130,7 @@ function UserMenu({ user, onSignOut }: { user: ShellUser; onSignOut: () => void 
         </DropdownMenuGroup>
       </DropdownMenuContent>
     </DropdownMenu>
+    </>
   );
 }
 

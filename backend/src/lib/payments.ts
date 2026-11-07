@@ -12,7 +12,8 @@ import { createCheckoutSession, retrieveCheckoutSession } from './stripe.js';
 import { sendEmail, escapeHtml } from './email.js';
 import { PLAN_PRICES, periodFor, type Plan } from './plans.js';
 import { passItem } from './passes.js';
-import { clubDate } from './repo.js';
+import { clubDate, getAdmin, getPlayer } from './repo.js';
+import { sendPush, toAdmin, toPlayer } from './push.js';
 import { refundCurrentSessionFee } from './sessions.js';
 import type { Payment, PaymentMethod } from './types.js';
 
@@ -120,6 +121,29 @@ async function writePending(p: {
   return { payment, token };
 }
 
+/** Tell the player's devices how their payment turned out. */
+async function notifySettled(playerId: string, payment: Payment, outcome: 'confirmed' | 'denied', madePass: boolean) {
+  const amount = dollars(payment.amountCents);
+  const how = payment.method === 'cash' ? 'cash' : 'card';
+  let title: string;
+  let body: string;
+  if (outcome === 'denied') {
+    title = 'Cash payment not confirmed';
+    body = `Your ${amount} cash payment wasn't confirmed. Check with an organizer.`;
+  } else if (madePass) {
+    title = `Your ${payment.plan === 'year' ? 'year' : 'quarter'} pass is active`;
+    body = `${payment.periodLabel ?? 'Pass'}: every session is covered. Paid ${amount} by ${how}.`;
+  } else {
+    const p = await getPlayer(playerId).catch(() => null);
+    const bal = p?.balanceCents;
+    title = 'Payment received';
+    body =
+      `${amount} ${how} payment confirmed.` +
+      (bal == null ? '' : ` Your balance is ${bal < 0 ? '−' : ''}${dollars(Math.abs(bal))}.`);
+  }
+  await sendPush(toPlayer(playerId), { title, body, url: '/player', tag: `pay-${payment.paymentId}` });
+}
+
 /**
  * Settle a pending payment exactly once, in one transaction conditioned on
  * status = pending. On 'confirmed':
@@ -201,6 +225,7 @@ async function settle(
         end: payment.periodEnd ?? '',
       }).catch((e) => console.error('session fee refund failed', { paymentId: payment.paymentId, e }));
     }
+    if (outcome !== 'expired') await notifySettled(playerId, payment, outcome, makePass);
     return 'done';
   } catch (err: any) {
     if (err?.name !== 'TransactionCanceledException') throw err;
@@ -247,10 +272,23 @@ export async function createCashPayment(input: {
     note: `Cash — ${input.playerName} — ${purchase.what}`,
     withToken: true,
   });
-  if (!input.adminEmail) return { payment, emailed: false };
 
   const link = `${baseUrl()}/confirm/${token}`;
   const amount = dollars(amountCents);
+  // Push to the admin's installed app too; it opens the same confirm page.
+  const adm = await getAdmin(input.adminId).catch(() => null);
+  await sendPush(
+    toAdmin({ cognitoSub: adm?.cognitoSub, email: input.adminEmail ?? adm?.email }),
+    {
+      title: `Confirm ${amount} cash`,
+      body: `${input.playerName} says they gave you ${amount}${input.plan ? ` for a ${purchase.what}` : ''}. Tap to confirm or deny.`,
+      url: `/confirm/${token}`,
+      tag: `cash-${payment.paymentId}`,
+    },
+    { urgency: 'high', ttlSeconds: 24 * 3600 },
+  );
+  if (!input.adminEmail) return { payment, emailed: false };
+
   const name = escapeHtml(input.playerName);
   const forWhat = input.plan ? ` for a ${purchase.what}` : '';
   try {
