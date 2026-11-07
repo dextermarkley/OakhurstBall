@@ -181,6 +181,12 @@ export function Kiosk() {
       setStep('result');
       return;
     }
+    if (r.result !== 'checked_in' && r.result !== 'already') {
+      // Never show "You're in" for a reply this version doesn't understand.
+      setError("Couldn't check you in. Please try again.");
+      setStep('pick');
+      return;
+    }
     setInGym(true);
     const title = r.result === 'already' ? `You're already in, ${first(r.name)}` : `You're in, ${first(r.name)}!`;
     const bal = r.balanceCents ?? 0;

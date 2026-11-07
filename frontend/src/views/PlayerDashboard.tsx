@@ -118,7 +118,11 @@ function SessionCard({ s, onChange }: { s: MySession; onChange: () => void }) {
   function report(r: CheckinResult) {
     if (r.result === 'no_session') toast.error('The gym just closed.');
     else if (r.result === 'already') toast.info("You're already checked in.");
-    else if (r.result === 'checked_in')
+    else if (r.result !== 'checked_in') {
+      // Never claim success for a reply we don't understand (e.g. an older app version).
+      toast.error("Couldn't check you in. Refresh the page and try again.");
+      return;
+    } else
       toast.success(
         r.pass
           ? 'Checked in. Covered by your pass.'

@@ -1,5 +1,10 @@
-// Service worker registration. New versions activate on the next load
-// (registerType: autoUpdate), so kiosks pick up deploys without a reinstall.
+// Service worker registration.
+//
+// A phone or iPad can keep the app open (or resume an installed app) for days, so
+// "check on page load" isn't enough: a stale bundle once misread a new API reply.
+// We check for a new version whenever the app comes back to the foreground and
+// every 15 minutes, and reload onto it as soon as it's installed
+// (registerType: autoUpdate → the new worker takes control and the page reloads).
 import { registerSW } from 'virtual:pwa-register';
 
 export function registerServiceWorker() {
@@ -7,8 +12,13 @@ export function registerServiceWorker() {
   registerSW({
     immediate: true,
     onRegisteredSW(_url, reg) {
-      // Long-running kiosks: check for an update every hour.
-      if (reg) setInterval(() => reg.update().catch(() => {}), 60 * 60 * 1000);
+      if (!reg) return;
+      const check = () => reg.update().catch(() => {});
+      setInterval(check, 15 * 60 * 1000);
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') check();
+      });
+      window.addEventListener('focus', check);
     },
   });
 }
