@@ -294,7 +294,8 @@ function PlanCard({ s, className, onBuy }: { s: MySession; className?: string; o
         ))}
         {!yearListed && <p className="text-xs text-muted-foreground">Year passes go on sale Apr 1 – Jun 30.</p>}
       </CardContent>
-      <CardFooter className="text-xs text-muted-foreground">
+      {/* mt-auto: side by side with a taller card, keep the footer at the bottom */}
+      <CardFooter className="mt-auto text-xs text-muted-foreground">
         {s.options.cardEnabled
           ? 'Card, Apple Pay and Google Pay through Stripe, or cash to an admin.'
           : 'Card payments aren’t set up yet. Pay cash to an admin.'}

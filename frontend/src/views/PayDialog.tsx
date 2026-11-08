@@ -260,15 +260,19 @@ export function PayDialog({
 
 function Option({ icon, title, sub, children }: { icon: React.ReactNode; title: string; sub: string; children: React.ReactNode }) {
   return (
-    <div className="flex flex-col gap-3 rounded-xl border p-3 sm:flex-row sm:items-center">
-      <div className="flex flex-1 items-center gap-3">
+    // Lays out by the card's own width, not the screen's: the dialog is narrow
+    // even on a desktop, so the buttons go under the text unless there's room.
+    <div className="@container rounded-xl border p-3">
+      <div className="flex flex-col gap-3 @md:flex-row @md:items-center">
+      <div className="flex min-w-0 flex-1 items-center gap-3">
         <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-secondary text-primary">{icon}</div>
         <div className="min-w-0">
           <div className="text-sm font-medium">{title}</div>
           <div className="truncate text-xs text-muted-foreground">{sub}</div>
         </div>
       </div>
-      <div className="flex gap-2 [&>button]:flex-1 sm:[&>button]:flex-none">{children}</div>
+      <div className="flex shrink-0 gap-2 [&>button]:flex-1 @md:[&>button]:flex-none">{children}</div>
+      </div>
     </div>
   );
 }
