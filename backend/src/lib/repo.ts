@@ -13,6 +13,7 @@ import { queryAll, queryPage } from './page.js';
 import { newId } from './crypto.js';
 import { paymentView } from './views.js';
 import { cleanName } from './text.js';
+import type { Contact } from './contact.js';
 import type { Admin, CheckIn, Payment, Player, PublicPlayer } from './types.js';
 
 const nowIso = () => new Date().toISOString();
@@ -67,6 +68,8 @@ export async function createPlayer(input: {
   phone?: string;
   pinHash?: string;
   cognitoSub?: string;
+  emergencyName?: string;
+  emergencyPhone?: string;
   /** Approved members can use the chat. Self sign-ups start unapproved. */
   approved?: boolean;
 }): Promise<Player> {
@@ -79,6 +82,8 @@ export async function createPlayer(input: {
     phone: input.phone,
     pinHash: input.pinHash,
     cognitoSub: input.cognitoSub,
+    ...(input.emergencyName ? { emergencyName: input.emergencyName } : {}),
+    ...(input.emergencyPhone ? { emergencyPhone: input.emergencyPhone } : {}),
     balanceCents: 0,
     active: true,
     approved: !!input.approved,
@@ -110,6 +115,10 @@ const publicPlayer = (i: any): PublicPlayer => ({
   email: i.email,
   createdAt: i.createdAt,
   hasAccount: !!i.cognitoSub,
+  // Contact details: admin pages only (the kiosk maps players to id/name/flag).
+  phone: i.phone,
+  emergencyName: i.emergencyName,
+  emergencyPhone: i.emergencyPhone,
 });
 
 const PLAYER_LIST = {
@@ -191,6 +200,19 @@ export async function approvedSubs(): Promise<Set<string>> {
     start = r.LastEvaluatedKey;
   } while (start);
   return out;
+}
+
+/** Save a player's phone + emergency contact (validated by checkContact). */
+export async function setPlayerContact(playerId: string, c: Contact): Promise<void> {
+  await ddb.send(
+    new UpdateCommand({
+      TableName: TABLE,
+      Key: keys.playerProfile(playerId),
+      UpdateExpression: 'SET phone = :p, emergencyName = :n, emergencyPhone = :e, contactAt = :now, updatedAt = :now',
+      ConditionExpression: 'attribute_exists(PK)',
+      ExpressionAttributeValues: { ':p': c.phone, ':n': c.emergencyName, ':e': c.emergencyPhone, ':now': nowIso() },
+    }),
+  );
 }
 
 export async function setPlayerPin(playerId: string, pinHash: string): Promise<void> {

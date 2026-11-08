@@ -63,6 +63,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { balanceText, dateOf, initials, longDateOf, money, planName, timeOf } from '@/lib/format';
 import { cn } from '@/lib/utils';
+import { normalizePhone, phoneText } from '@/lib/contact';
 import { pairingUrl } from '@/pairing';
 import { AuthGate } from './AuthGate';
 import { StatusBadge } from './PlayerDashboard';
@@ -636,9 +637,35 @@ function AttendeeTable({ attendees }: { attendees: Attendee[] }) {
 
 /* ───────────────────────────── Players ───────────────────────────── */
 
+/** Phone + emergency contact on the players list (tap a number to call it). */
+function ContactLine({ p }: { p: any }) {
+  const tel = (e164: string) => (
+    <a href={`tel:${e164}`} className="underline-offset-2 hover:underline" onClick={(e) => e.stopPropagation()}>
+      {phoneText(e164)}
+    </a>
+  );
+  if (!p.phone && !p.emergencyPhone) {
+    return p.hasAccount ? <div className="text-xs text-brand">No contact details yet (asked at next sign-in)</div> : null;
+  }
+  return (
+    <div className="truncate text-xs text-muted-foreground">
+      {p.phone && tel(p.phone)}
+      {p.emergencyPhone && (
+        <>
+          {p.phone && ' · '}Emergency: {p.emergencyName} {tel(p.emergencyPhone)}
+        </>
+      )}
+    </div>
+  );
+}
+
+const optionalPhone = z.union([z.literal(''), z.string().trim().refine((v) => !!normalizePhone(v), 'Enter a phone number like (415) 555-0123')]);
 const playerSchema = z.object({
   name: z.string().trim().min(2, 'Enter a name'),
   email: z.union([z.literal(''), z.string().trim().email('Enter a valid email')]),
+  phone: optionalPhone,
+  emergencyName: z.string().trim().max(60),
+  emergencyPhone: optionalPhone,
   pin: z.union([z.literal(''), z.string().regex(/^\d{4,6}$/, 'Use 4 to 6 digits')]),
 });
 const chargeSchema = z.object({
@@ -744,6 +771,7 @@ function PlayersTab() {
                     {p.email ?? 'No email'}
                     {p.createdAt && ` · joined ${longDateOf(p.createdAt)}`}
                   </div>
+                  <ContactLine p={p} />
                 </div>
                 <Button size="sm" onClick={() => approve(p, true)}>
                   <UserCheck /> Approve
@@ -788,7 +816,10 @@ function PlayersTab() {
                         <Avatar className="size-8">
                           <AvatarFallback className="text-xs">{initials(p.name)}</AvatarFallback>
                         </Avatar>
-                        <span className="font-medium">{p.name}</span>
+                        <div className="min-w-0">
+                          <span className="font-medium">{p.name}</span>
+                          <ContactLine p={p} />
+                        </div>
                         {!(p.waiverVersion === versions?.waiver && p.rulesVersion === versions?.rules) && (
                           <Badge
                             variant="outline"
@@ -873,11 +904,18 @@ function PlayersTab() {
 function AddPlayerDialog({ open, onOpenChange, onDone }: { open: boolean; onOpenChange: (o: boolean) => void; onDone: () => void }) {
   const form = useForm<z.infer<typeof playerSchema>>({
     resolver: zodResolver(playerSchema),
-    defaultValues: { name: '', email: '', pin: '' },
+    defaultValues: { name: '', email: '', pin: '', phone: '', emergencyName: '', emergencyPhone: '' },
   });
   const submit = form.handleSubmit(async (v) => {
     try {
-      await api.createPlayer({ name: v.name, email: v.email || undefined, pin: v.pin || undefined });
+      await api.createPlayer({
+        name: v.name,
+        email: v.email || undefined,
+        pin: v.pin || undefined,
+        phone: v.phone || undefined,
+        emergencyName: v.emergencyName || undefined,
+        emergencyPhone: v.emergencyPhone || undefined,
+      });
       toast.success(`${v.name} added.`);
       form.reset();
       onOpenChange(false);
@@ -897,6 +935,9 @@ function AddPlayerDialog({ open, onOpenChange, onDone }: { open: boolean; onOpen
           <FieldGroup className="py-5">
             <FormInput control={form.control} name="name" label="Name" autoComplete="off" />
             <FormInput control={form.control} name="email" label="Email (optional)" type="email" autoComplete="off" />
+            <FormInput control={form.control} name="phone" label="Phone (optional)" type="tel" inputMode="tel" autoComplete="off" />
+            <FormInput control={form.control} name="emergencyName" label="Emergency contact (optional)" autoComplete="off" />
+            <FormInput control={form.control} name="emergencyPhone" label="Emergency contact’s phone (optional)" type="tel" inputMode="tel" autoComplete="off" />
             <FormInput
               control={form.control}
               name="pin"

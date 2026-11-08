@@ -16,6 +16,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Spinner } from '@/components/ui/spinner';
 import { disableNotifications } from '@/notifications';
 import { AgreementsGate } from './Agreements';
+import { contactShape, normalizePhone, savePendingContact } from '@/lib/contact';
 
 type Mode = 'signin' | 'signup' | 'confirm' | 'forgot';
 
@@ -41,19 +42,21 @@ function authError(e: any, fallback: string) {
 
 const email = z.string().trim().toLowerCase().email('Enter a valid email address');
 const signInSchema = z.object({ email, password: z.string().min(1, 'Enter your password') });
-const signUpSchema = z.object({
-  name: z.string().trim().min(2, 'Enter your full name'),
-  email,
-  password: z
-    .string()
-    .min(8, 'At least 8 characters')
-    .regex(/[a-z]/, 'Include a lowercase letter')
-    .regex(/\d/, 'Include a number'),
-});
+const password = z
+  .string()
+  .min(8, 'At least 8 characters')
+  .regex(/[a-z]/, 'Include a lowercase letter')
+  .regex(/\d/, 'Include a number');
+const signUpSchema = z
+  .object({ name: z.string().trim().min(2, 'Enter your full name'), email, password, ...contactShape })
+  .refine((v) => normalizePhone(v.phone) !== normalizePhone(v.emergencyPhone), {
+    path: ['emergencyPhone'],
+    message: 'Your emergency contact needs a different number from yours',
+  });
 const forgotSchema = z.object({ email });
 const resetSchema = z.object({
   code: z.string().regex(/^\d{6}$/, 'Enter the 6-digit code'),
-  password: signUpSchema.shape.password,
+  password,
 });
 const confirmSchema = z.object({ code: z.string().regex(/^\d{6}$/, 'Enter the 6-digit code') });
 
@@ -201,13 +204,15 @@ function SignUpForm({ onDone, onSwitch }: { onDone: (c: { email: string; passwor
   const [error, setError] = useState('');
   const form = useForm<z.infer<typeof signUpSchema>>({
     resolver: zodResolver(signUpSchema),
-    defaultValues: { name: '', email: '', password: '' },
+    defaultValues: { name: '', email: '', password: '', phone: '', emergencyName: '', emergencyPhone: '' },
   });
 
   const submit = form.handleSubmit(async (v) => {
     setError('');
     try {
       await signUp({ username: v.email, password: v.password, options: { userAttributes: { email: v.email, name: v.name } } });
+      // Saved to the profile on first sign-in (see ContactGate).
+      savePendingContact(v.email, { phone: v.phone, emergencyName: v.emergencyName, emergencyPhone: v.emergencyPhone });
       toast.success('We emailed you a 6-digit code.');
       onDone({ email: v.email, password: v.password });
     } catch (e: any) {
@@ -230,6 +235,15 @@ function SignUpForm({ onDone, onSwitch }: { onDone: (c: { email: string; passwor
           )}
           <FormInput control={form.control} name="name" label="Full name" autoComplete="name" />
           <FormInput control={form.control} name="email" label="Email" type="email" autoComplete="email" inputMode="email" />
+          <FormInput control={form.control} name="phone" label="Phone number" type="tel" autoComplete="tel" inputMode="tel" />
+          <div className="space-y-3 rounded-lg border p-3">
+            <div>
+              <div className="text-sm font-medium">Emergency contact</div>
+              <p className="text-xs text-muted-foreground">Who we call if you get hurt at the gym. Only admins can see it.</p>
+            </div>
+            <FormInput control={form.control} name="emergencyName" label="Their name" autoComplete="off" />
+            <FormInput control={form.control} name="emergencyPhone" label="Their phone number" type="tel" autoComplete="off" inputMode="tel" />
+          </div>
           <FormInput
             control={form.control}
             name="password"

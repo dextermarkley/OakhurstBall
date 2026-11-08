@@ -16,8 +16,8 @@ import {
   KeyRound,
   Lock,
   Ticket,
-  Users,
-} from 'lucide-react';
+  Users, PhoneCall } from 'lucide-react';
+import { contactSchema, phoneText, type ContactValues } from '@/lib/contact';
 import { api, type CheckinResult, type MySession, type Plan, type PlanOffer } from '@/api';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { FormInput } from '@/components/form-field';
@@ -134,6 +134,7 @@ export function PlayerDashboard() {
         checkinsCursor={data.checkinsCursor ?? null}
         paymentsCursor={data.paymentsCursor ?? null}
       />
+      <ContactCard contact={data.contact} onSaved={load} />
       <PinCard />
     </div>
   );
@@ -520,6 +521,55 @@ function EmptyRow({ icon: Icon, text }: { icon: any; text: string }) {
         <EmptyDescription>{text}</EmptyDescription>
       </EmptyHeader>
     </Empty>
+  );
+}
+
+/** Edit your phone + emergency contact (required, so it can be changed but not removed). */
+function ContactCard({
+  contact,
+  onSaved,
+}: {
+  contact?: { phone: string | null; emergencyName: string | null; emergencyPhone: string | null };
+  onSaved: () => void;
+}) {
+  const form = useForm<ContactValues>({
+    resolver: zodResolver(contactSchema),
+    values: {
+      phone: phoneText(contact?.phone),
+      emergencyName: contact?.emergencyName ?? '',
+      emergencyPhone: phoneText(contact?.emergencyPhone),
+    },
+  });
+  const submit = form.handleSubmit(async (v) => {
+    try {
+      await api.setContact(v);
+      toast.success('Contact details saved.');
+      onSaved();
+    } catch (e: any) {
+      toast.error(e.message);
+    }
+  });
+  return (
+    <Card>
+      <form onSubmit={submit} noValidate>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <PhoneCall className="size-4 text-muted-foreground" /> Contact details
+          </CardTitle>
+          <CardDescription>Your phone number and who to call in an emergency. Only admins can see them.</CardDescription>
+        </CardHeader>
+        <CardContent className="grid gap-3 pt-4 sm:grid-cols-3">
+          <FormInput control={form.control} name="phone" label="Your phone" type="tel" autoComplete="tel" inputMode="tel" />
+          <FormInput control={form.control} name="emergencyName" label="Emergency contact" autoComplete="off" />
+          <FormInput control={form.control} name="emergencyPhone" label="Their phone" type="tel" autoComplete="off" inputMode="tel" />
+        </CardContent>
+        <CardFooter className="justify-end">
+          <Button type="submit" disabled={form.formState.isSubmitting || !form.formState.isDirty}>
+            {form.formState.isSubmitting && <Spinner />} Save
+          </Button>
+        </CardFooter>
+      </form>
+    </Card>
   );
 }
 

@@ -201,6 +201,13 @@ export const api = {
   async pushTest() {
     return req<{ sent: number; failed: number }>('/api/me/push/test', { method: 'POST', headers: await authHeaders() });
   },
+  async setContact(c: { phone: string; emergencyName: string; emergencyPhone: string }) {
+    return req<{ contact: { phone: string; emergencyName: string; emergencyPhone: string } }>('/api/me/contact', {
+      method: 'PUT',
+      headers: await authHeaders(),
+      body: JSON.stringify(c),
+    });
+  },
   async setPin(pin: string) {
     return req('/api/me/pin', {
       method: 'POST',
@@ -214,7 +221,14 @@ export const api = {
     const h = await authHeaders();
     return allPages((c) => req<any>(withCursor('/api/admin/players', c), { headers: h }), 'players');
   },
-  async createPlayer(p: { name: string; email?: string; phone?: string; pin?: string }) {
+  async createPlayer(p: {
+    name: string;
+    email?: string;
+    phone?: string;
+    pin?: string;
+    emergencyName?: string;
+    emergencyPhone?: string;
+  }) {
     return req('/api/admin/players', {
       method: 'POST',
       headers: await authHeaders(),
@@ -403,6 +417,9 @@ export interface AgreementDoc {
   sections: Array<{ heading?: string; body: string }>;
 }
 export interface AgreementsStatus {
+  /** Phone + emergency contact; asked for once if missing (contactComplete false). */
+  contact: { phone: string | null; emergencyName: string | null; emergencyPhone: string | null } | null;
+  contactComplete: boolean;
   waiver: AgreementDoc;
   rules: AgreementDoc;
   hasPlayer: boolean;

@@ -1,6 +1,8 @@
 // Waiver + club rules. Every signed-in page sits behind AgreementsGate: a player
 // who hasn't signed the current versions sees this screen first (new sign-ups
 // right after their first sign-in, everyone else when either document changes).
+// Before that, a player with no phone + emergency contact on file gives them
+// (ContactScreen).
 import { useEffect, useState, type ReactNode } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -17,18 +19,44 @@ import { Input } from '@/components/ui/input';
 import { Spinner } from '@/components/ui/spinner';
 import { longDateOf } from '@/lib/format';
 import { cn } from '@/lib/utils';
+import { fetchUserAttributes } from 'aws-amplify/auth';
+import { clearPendingContact, takePendingContact } from '@/lib/contact';
+import { ContactScreen } from './ContactScreen';
 
 export function AgreementsGate({ children, onSignOut }: { children: ReactNode; onSignOut: () => void }) {
   const [s, setS] = useState<AgreementsStatus | null>(null);
   const [failed, setFailed] = useState(false);
 
+  // Contact details typed at sign-up are saved here, on the account's first
+  // sign-in, so most new members never see the contact step.
+  const [triedPending, setTriedPending] = useState(false);
+
   useEffect(() => {
     api
       .agreements()
-      .then(setS)
+      .then(async (st) => {
+        if (st.hasPlayer && !st.contactComplete) {
+          try {
+            const { email } = await fetchUserAttributes();
+            const pending = email ? takePendingContact(email) : null;
+            if (pending) {
+              await api.setContact(pending);
+              st = { ...st, contactComplete: true };
+            }
+            clearPendingContact();
+          } catch {
+            /* the contact screen asks instead */
+          }
+        }
+        setTriedPending(true);
+        setS(st);
+      })
       .catch(() => setFailed(true)); // never lock people out over a network blip
   }, []);
 
+  if (s && s.hasPlayer && !s.contactComplete && triedPending && !failed) {
+    return <ContactScreen initial={s.contact} onSaved={() => setS({ ...s, contactComplete: true })} onSignOut={onSignOut} />;
+  }
   if (failed || (s && (s.current || !s.hasPlayer))) return <>{children}</>;
   if (!s) {
     return (

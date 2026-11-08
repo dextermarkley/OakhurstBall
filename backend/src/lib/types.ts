@@ -10,6 +10,9 @@ export interface Player {
   name: string;
   email?: string;
   phone?: string; // E.164
+  /** Emergency contact (required for members with an account; see contact.ts). */
+  emergencyName?: string;
+  emergencyPhone?: string; // E.164
   /** bcrypt-style hash of the kiosk PIN (we use scrypt from node:crypto). */
   pinHash?: string;
   /** Balance in cents. Negative = the player owes the club money. */
@@ -98,4 +101,7 @@ export interface PublicPlayer {
   createdAt?: string;
   /** Signed up with an account (vs. added by an admin for the kiosk). */
   hasAccount?: boolean;
+  phone?: string;
+  emergencyName?: string;
+  emergencyPhone?: string;
 }

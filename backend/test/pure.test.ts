@@ -341,3 +341,27 @@ test('page limits are clamped', () => {
   assert.equal(pageLimit('0', 25, 100), 25);
   assert.equal(pageLimit('abc', 25, 100), 25);
 });
+
+// ── Phone + emergency contact ──
+import { normalizePhone, checkContact, hasContact } from '../src/lib/contact.js';
+
+test('phones: common US formats become E.164, junk is refused', () => {
+  for (const v of ['(415) 555-0123', '415.555.0123', '415 555 0123', '4155550123', '1 415 555 0123', '+1 415-555-0123']) {
+    assert.equal(normalizePhone(v), '+14155550123', v);
+  }
+  assert.equal(normalizePhone('+44 20 7946 0958'), '+442079460958');
+  for (const v of ['555-0123', '015 555 0123', 'call me', '', '+0123456789', '1'.repeat(41), 4155550123, null]) {
+    assert.equal(normalizePhone(v as any), null, String(v));
+  }
+});
+
+test('contact: all three required, cleaned, emergency number must differ', () => {
+  const ok = checkContact({ phone: '415-555-0123', emergencyName: '  Riley\u202e Rivera ', emergencyPhone: '(510) 555-0199' });
+  assert.deepEqual(ok.contact, { phone: '+14155550123', emergencyName: 'Riley Rivera', emergencyPhone: '+15105550199' });
+  assert.ok(checkContact({ emergencyName: 'Riley', emergencyPhone: '5105550199' }).error);
+  assert.ok(checkContact({ phone: '4155550123', emergencyPhone: '5105550199' }).error);
+  assert.ok(checkContact({ phone: '4155550123', emergencyName: 'Riley' }).error);
+  assert.ok(checkContact({ phone: '4155550123', emergencyName: 'Riley', emergencyPhone: '(415) 555-0123' }).error);
+  assert.equal(hasContact({ phone: '+1', emergencyName: 'a', emergencyPhone: '+1' }), true);
+  assert.equal(hasContact({ phone: '+1' }), false);
+});

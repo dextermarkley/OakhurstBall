@@ -35,6 +35,7 @@ import {
   clearPinFailures,
   linkAdminSub,
   setPlayerPin,
+  setPlayerContact,
   playerCheckins,
   playerPayments,
   createKiosk,
@@ -50,6 +51,7 @@ import { ddb, TABLE, keys } from '../lib/ddb.js';
 import { GetCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
 import { verifySecret, hashSecret, hashToken, verifyToken } from '../lib/crypto.js';
 import { cleanEmail, cleanName, isId, isPin } from '../lib/text.js';
+import { checkContact, hasContact, normalizePhone } from '../lib/contact.js';
 import { BadCursor, pageLimit } from '../lib/page.js';
 import type { Player } from '../lib/types.js';
 import {
@@ -644,6 +646,11 @@ async function apiRouter(
       checkinsCursor: c.nextCursor,
       payments: p.payments,
       paymentsCursor: p.nextCursor,
+      contact: {
+        phone: player.phone ?? null,
+        emergencyName: (player as any).emergencyName ?? null,
+        emergencyPhone: (player as any).emergencyPhone ?? null,
+      },
       checkinCount: stats.checkinCount,
       checkinsByMonth: stats.byMonth,
       passes: passes.map(passView),
@@ -812,6 +819,11 @@ async function apiRouter(
       waiver: WAIVER,
       rules: RULES,
       hasPlayer: !!player,
+      // Phone + emergency contact: the app asks for them once if missing.
+      contact: player
+        ? { phone: player.phone ?? null, emergencyName: (player as any).emergencyName ?? null, emergencyPhone: (player as any).emergencyPhone ?? null }
+        : null,
+      contactComplete: !player || hasContact(player),
       current: isCurrent(player as any),
       signed: player && (player as any).agreedAt
         ? {
@@ -834,6 +846,16 @@ async function apiRouter(
       userAgent: event.requestContext?.http?.userAgent,
     });
     return ok({ current: true, agreedAt });
+  }
+
+  // PUT /api/me/contact { phone, emergencyName, emergencyPhone } — required details
+  if (path === '/api/me/contact' && m === 'PUT') {
+    const { contact, error } = checkContact(parseBody(event));
+    if (error) return badRequest(error);
+    const player = await getPlayerByCognitoSub(claims.sub);
+    if (!player) return notFound("We couldn’t find your player profile. Sign out and back in, or ask an admin.");
+    await setPlayerContact(player.playerId, contact!);
+    return ok({ contact });
   }
 
   // POST /api/me/pin  { pin }  — player sets their own kiosk PIN
@@ -895,13 +917,21 @@ async function apiRouter(
     if (!name) return badRequest('Enter a name');
     const email = rawEmail == null || rawEmail === '' ? undefined : cleanEmail(rawEmail);
     if (email === null) return badRequest('That email address doesn’t look right');
-    const phone = typeof rawPhone === 'string' && rawPhone.trim() ? rawPhone.trim() : undefined;
-    if (phone && !/^\+?[\d\s().-]{7,20}$/.test(phone)) return badRequest('That phone number doesn’t look right');
+    // Optional for players an admin adds (kiosk-only); if given, checked like sign-up.
+    const b = parseBody(event);
+    const given = (v: unknown) => typeof v === 'string' && v.trim() !== '';
+    const phone = given(rawPhone) ? normalizePhone(rawPhone) : undefined;
+    if (phone === null) return badRequest('That phone number doesn’t look right');
+    const emergencyName = given(b.emergencyName) ? cleanName(b.emergencyName) : undefined;
+    const emergencyPhone = given(b.emergencyPhone) ? normalizePhone(b.emergencyPhone) : undefined;
+    if (emergencyPhone === null) return badRequest('That emergency contact number doesn’t look right');
     if (pin != null && pin !== '' && !isPin(pin)) return badRequest('PIN must be 4–6 digits');
     const player = await createPlayer({
       name,
       email,
       phone,
+      emergencyName,
+      emergencyPhone,
       pinHash: pin != null && pin !== '' ? hashSecret(String(pin)) : undefined,
       approved: true, // added by an admin, so already vouched for
     });
