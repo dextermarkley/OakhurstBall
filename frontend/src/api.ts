@@ -265,8 +265,19 @@ export const api = {
   async sessions() {
     return req<{ sessions: AdminSession[] }>('/api/admin/sessions', { headers: await authHeaders() });
   },
-  async openSession() {
-    return req<{ session: Session }>('/api/admin/sessions', { method: 'POST', headers: await authHeaders() });
+  async openSession(free = false) {
+    return req<{ session: Session }>('/api/admin/sessions', {
+      method: 'POST',
+      headers: await authHeaders(),
+      body: JSON.stringify({ free }),
+    });
+  },
+  async setFreeDay(sessionId: string, free: boolean) {
+    return req<{ session: Session; refunded: number; refundedCents: number }>(`/api/admin/sessions/${sessionId}/free`, {
+      method: 'POST',
+      headers: await authHeaders(),
+      body: JSON.stringify({ free }),
+    });
   },
   async closeSession(sessionId: string) {
     return req<{ result: string }>(`/api/admin/sessions/${sessionId}/close`, {
@@ -392,6 +403,8 @@ export interface Session {
   closedAt?: string;
   openedByName: string;
   attendeeCount: number;
+  /** Free day: no charge to check in. */
+  free?: boolean;
 }
 export interface AdminSession extends Session {
   open: boolean;
@@ -405,6 +418,7 @@ export interface Attendee {
   feeCents: number;
   source: 'kiosk' | 'player';
   coveredBy?: Plan;
+  freeDay?: boolean;
 }
 export type Plan = 'quarter' | 'year';
 export interface PlanOffer {
@@ -437,7 +451,7 @@ export interface MySession {
   pass: PassView | null;
   canCheckIn: boolean;
   /** covered: pass · credit: balance pays the fee · owe: may pay next time · blocked: must pay first */
-  payState: 'covered' | 'credit' | 'owe' | 'blocked';
+  payState: 'covered' | 'free' | 'credit' | 'owe' | 'blocked';
   needCents: number;
   options: PayOptions;
 }
@@ -527,6 +541,8 @@ export interface CheckinResult {
   limitCents?: number;
   pass?: PassView | null;
   options?: PayOptions;
+  /** Checked in for free because it's a free day. */
+  freeDay?: boolean;
 }
 
 // ── Stripe return page (public; the server re-verifies with Stripe) ──

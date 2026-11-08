@@ -71,6 +71,7 @@ import {
   isOpen,
   endedAt,
   refundCurrentSessionFee,
+  setFreeDay,
   type CheckInResult,
 } from '../lib/sessions.js';
 import { isPlan, type Plan } from '../lib/plans.js';
@@ -163,7 +164,7 @@ async function checkInResponse(name: string, r: CheckInResult) {
       needCents: Math.max(0, r.minBalanceCents - r.balanceCents),
     });
   }
-  return ok({ ...base, feeCents: r.feeCents });
+  return ok({ ...base, feeCents: r.feeCents, freeDay: !!r.session.free && !r.pass });
 }
 
 export const handler = async (
@@ -538,12 +539,15 @@ async function apiRouter(
       session ? isCheckedIn(session.sessionId, player.playerId) : Promise.resolve(false),
       coveringPass(player.playerId, session?.eventDate),
     ]);
-    const feeCents = pass ? 0 : AMOUNTS.dailyFee;
+    const freeDay = !!session?.free;
+    const feeCents = pass || freeDay ? 0 : AMOUNTS.dailyFee;
     const minBalance = feeCents - NEGATIVE_LIMIT_CENTS;
-    // covered: pass · credit: balance pays the fee · owe: may pay next time · blocked: must pay first
+    // covered: pass · free: free day · credit: balance pays the fee · owe: may pay next time · blocked: must pay first
     const payState = pass
       ? 'covered'
-      : player.balanceCents >= feeCents
+      : freeDay
+        ? 'free'
+        : player.balanceCents >= feeCents
         ? 'credit'
         : player.balanceCents >= minBalance
           ? 'owe'
@@ -556,8 +560,8 @@ async function apiRouter(
       feeCents,
       limitCents: NEGATIVE_LIMIT_CENTS,
       pass: passView(pass),
-      canCheckIn: !!session && !checkedIn && (!!pass || player.balanceCents >= minBalance),
-      needCents: pass ? 0 : Math.max(0, minBalance - player.balanceCents),
+      canCheckIn: !!session && !checkedIn && (!!pass || freeDay || player.balanceCents >= minBalance),
+      needCents: pass || freeDay ? 0 : Math.max(0, minBalance - player.balanceCents),
       options: await payOptions(pass),
     });
   }
@@ -876,7 +880,8 @@ async function apiRouter(
 
   // POST /api/admin/sessions — open the gym (409 if a session is already open)
   if (path === '/api/admin/sessions' && m === 'POST') {
-    const s = await openSession(claims.name || claims.email || 'Admin');
+    const { free } = parseBody(event);
+    const s = await openSession(claims.name || claims.email || 'Admin', free === true);
     if (!s) return json(409, { error: 'A session is already open' });
     const until = new Intl.DateTimeFormat('en-US', {
       timeZone: process.env.CLUB_TZ ?? 'America/Los_Angeles',
@@ -885,8 +890,10 @@ async function apiRouter(
     }).format(new Date(s.closesAt));
     // Everyone with notifications on, except whoever just opened it.
     await sendPush((d) => d.sub !== claims.sub, {
-      title: 'The gym is open',
-      body: `Pickup is on until ${until}. Check in when you get there.`,
+      title: s.free ? 'Free day! The gym is open' : 'The gym is open',
+      body: s.free
+        ? `No charge to play today. Pickup is on until ${until}. Check in when you get there.`
+        : `Pickup is on until ${until}. Check in when you get there.`,
       url: '/player',
       tag: 'gym-open',
     }, { ttlSeconds: 2 * 3600 });
@@ -903,6 +910,18 @@ async function apiRouter(
       session: { ...s, open: isOpen(s, now), endedAt: endedAt(s, now) },
       attendees: await sessionAttendees(s.sessionId),
     });
+  }
+
+  // POST /api/admin/sessions/{id}/free { free: boolean } — free day on/off for an
+  // open session. Turning it on refunds anyone already charged for it.
+  const freeMatch = path.match(/^\/api\/admin\/sessions\/([a-f0-9]{24})\/free$/);
+  if (freeMatch && m === 'POST') {
+    const { free } = parseBody(event);
+    if (typeof free !== 'boolean') return badRequest('free must be true or false');
+    const r = await setFreeDay(freeMatch[1], free);
+    if (r.result === 'notfound') return notFound('session');
+    if (r.result === 'closed') return json(409, { error: 'That session is closed' });
+    return ok({ session: r.session, refunded: r.refunded, refundedCents: r.refundedCents });
   }
 
   // POST /api/admin/sessions/{id}/close

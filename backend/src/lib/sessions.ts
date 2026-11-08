@@ -34,6 +34,8 @@ export interface Session {
   closedAt?: string; // set when an admin closes it early
   openedByName: string;
   attendeeCount: number;
+  /** Free day: checking in costs nothing and the negative-balance limit doesn't apply. */
+  free?: boolean;
 }
 
 export interface Attendee {
@@ -43,6 +45,7 @@ export interface Attendee {
   feeCents: number;
   source: 'kiosk' | 'player';
   coveredBy?: 'quarter' | 'year';
+  freeDay?: boolean;
 }
 
 const nowIso = () => new Date().toISOString();
@@ -62,6 +65,7 @@ const toSession = (i: any): Session => ({
   closedAt: i.closedAt,
   openedByName: i.openedByName,
   attendeeCount: i.attendeeCount ?? 0,
+  ...(i.free ? { free: true } : {}),
 });
 
 export async function getSession(sessionId: string): Promise<Session | null> {
@@ -78,7 +82,7 @@ export async function currentSession(): Promise<Session | null> {
 }
 
 /** Open a session. Returns null if one is already open. */
-export async function openSession(openedByName: string): Promise<Session | null> {
+export async function openSession(openedByName: string, free = false): Promise<Session | null> {
   const opened = new Date();
   const s: Session = {
     sessionId: newId(),
@@ -87,6 +91,7 @@ export async function openSession(openedByName: string): Promise<Session | null>
     closesAt: new Date(opened.getTime() + SESSION_HOURS * 3_600_000).toISOString(),
     openedByName,
     attendeeCount: 0,
+    ...(free ? { free: true } : {}),
   };
   try {
     await ddb.send(
@@ -185,6 +190,7 @@ export async function sessionAttendees(sessionId: string): Promise<Attendee[]> {
       feeCents: i.feeCents ?? 0,
       source: i.source,
       coveredBy: i.coveredBy,
+      ...(i.freeDay ? { freeDay: true } : {}),
     }))
     .sort((a, b) => a.at.localeCompare(b.at));
 }
@@ -234,13 +240,16 @@ export async function sessionCheckIn(
   // A quarter/year pass covering the session's date makes check-in free, and the
   // negative-balance limit does not apply (the period is paid for).
   const pass = await coveringPass(player.playerId, session.eventDate);
-  if (pass) feeCents = 0;
+  // A free day works the same way for everyone: no fee, no balance check.
+  const freeDay = !!session.free && !pass;
+  if (pass || freeDay) feeCents = 0;
+  const noCheck = !!pass || freeDay;
   const at = nowIso();
   // Lowest balance (before the fee) that may still defer payment.
   const limitMin = feeCents - NEGATIVE_LIMIT_CENTS;
   // In auto mode the balance must cover the fee outright.
   const minBalanceCents = mode === 'auto' ? feeCents : limitMin;
-  const balanceCondition = pass ? 'attribute_exists(PK)' : 'attribute_exists(PK) AND balanceCents >= :min';
+  const balanceCondition = noCheck ? 'attribute_exists(PK)' : 'attribute_exists(PK) AND balanceCents >= :min';
   try {
     await ddb.send(
       new TransactWriteCommand({
@@ -265,6 +274,7 @@ export async function sessionCheckIn(
                 feeCents,
                 source,
                 ...(pass ? { coveredBy: pass.plan } : {}),
+                ...(freeDay ? { freeDay: true } : {}),
               },
               ConditionExpression: 'attribute_not_exists(PK)',
             },
@@ -278,7 +288,7 @@ export async function sessionCheckIn(
               ExpressionAttributeValues: {
                 ':fee': -feeCents,
                 ':now': at,
-                ...(pass ? {} : { ':min': minBalanceCents }),
+                ...(noCheck ? {} : { ':min': minBalanceCents }),
               },
             },
           },
@@ -295,6 +305,7 @@ export async function sessionCheckIn(
                 source,
                 feeCents,
                 ...(pass ? { coveredBy: pass.plan } : {}),
+                ...(freeDay ? { freeDay: true } : {}),
               },
             },
           },
@@ -366,4 +377,91 @@ export async function refundCurrentSessionFee(
     if (err?.name === 'TransactionCanceledException') return 0; // already refunded
     throw err;
   }
+}
+
+/**
+ * Turn free day on or off for an open session.
+ *   on  → everyone who already paid the fee for this session gets it back
+ *         (each refund conditioned on the fee still being there, so at most once);
+ *         later check-ins cost nothing.
+ *   off → later check-ins pay again; people who checked in free stay free.
+ */
+export async function setFreeDay(
+  sessionId: string,
+  free: boolean,
+): Promise<{ result: 'ok' | 'closed' | 'notfound'; session?: Session; refunded: number; refundedCents: number }> {
+  const s = await getSession(sessionId);
+  if (!s) return { result: 'notfound', refunded: 0, refundedCents: 0 };
+  if (!isOpen(s)) return { result: 'closed', refunded: 0, refundedCents: 0 };
+  await ddb.send(
+    new TransactWriteCommand({
+      TransactItems: [
+        {
+          Update: {
+            TableName: TABLE,
+            Key: metaKey(sessionId),
+            UpdateExpression: free ? 'SET #f = :t' : 'REMOVE #f',
+            ConditionExpression: 'attribute_not_exists(closedAt)',
+            ExpressionAttributeNames: { '#f': 'free' },
+            ...(free ? { ExpressionAttributeValues: { ':t': true } } : {}),
+          },
+        },
+      ],
+    }),
+  );
+  let refunded = 0;
+  let refundedCents = 0;
+  if (free) {
+    const r = await ddb.send(
+      new QueryCommand({
+        TableName: TABLE,
+        KeyConditionExpression: 'PK = :pk AND begins_with(SK, :sk)',
+        ExpressionAttributeValues: { ':pk': `SESSION#${sessionId}`, ':sk': 'ATTEND#' },
+      }),
+    );
+    for (const a of r.Items ?? []) {
+      const fee = (a as any).feeCents ?? 0;
+      if (!fee) continue;
+      try {
+        await ddb.send(
+          new TransactWriteCommand({
+            TransactItems: [
+              {
+                Update: {
+                  TableName: TABLE,
+                  Key: attendKey(sessionId, a.playerId),
+                  UpdateExpression: 'SET feeCents = :zero, freeDay = :t, refundedCents = :fee',
+                  ConditionExpression: 'feeCents = :fee',
+                  ExpressionAttributeValues: { ':zero': 0, ':t': true, ':fee': fee },
+                },
+              },
+              {
+                // Their own attendance history shows $0 / "Free day" too.
+                Update: {
+                  TableName: TABLE,
+                  Key: keys.checkin(a.playerId, a.at),
+                  UpdateExpression: 'SET feeCents = :zero, freeDay = :t',
+                  ConditionExpression: 'attribute_exists(PK)',
+                  ExpressionAttributeValues: { ':zero': 0, ':t': true },
+                },
+              },
+              {
+                Update: {
+                  TableName: TABLE,
+                  Key: keys.playerProfile(a.playerId),
+                  UpdateExpression: 'ADD balanceCents :fee SET updatedAt = :now',
+                  ExpressionAttributeValues: { ':fee': fee, ':now': nowIso() },
+                },
+              },
+            ],
+          }),
+        );
+        refunded++;
+        refundedCents += fee;
+      } catch (err: any) {
+        if (err?.name !== 'TransactionCanceledException') throw err; // already refunded
+      }
+    }
+  }
+  return { result: 'ok', session: (await getSession(sessionId)) ?? undefined, refunded, refundedCents };
 }

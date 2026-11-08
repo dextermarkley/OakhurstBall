@@ -12,6 +12,7 @@ import {
   CircleDollarSign,
   Clock,
   CreditCard,
+  Gift,
   KeyRound,
   Lock,
   Ticket,
@@ -137,7 +138,9 @@ function SessionCard({ s, onChange }: { s: MySession; onChange: () => void }) {
       toast.success(
         r.pass
           ? 'Checked in. Covered by your pass.'
-          : (r.balanceCents ?? 0) < 0
+          : r.freeDay
+            ? 'Checked in. It’s a free day, so no charge today!'
+            : (r.balanceCents ?? 0) < 0
             ? `Checked in. Balance ${balanceText(r.balanceCents ?? 0)}.`
             : `Checked in. ${money(r.feeCents ?? 0)} from your credit.`,
       );
@@ -184,7 +187,15 @@ function SessionCard({ s, onChange }: { s: MySession; onChange: () => void }) {
             <span className="relative inline-flex size-2.5 rounded-full bg-success" />
           </span>
           <div>
-            <div className="text-lg font-semibold">The gym is open</div>
+            <div className="flex flex-wrap items-center gap-2 text-lg font-semibold">
+              The gym is open
+              {s.session.free && (
+                <Badge className="bg-success text-white">
+                  <Gift /> Free day
+                </Badge>
+              )}
+            </div>
+            {s.session.free && <div className="mt-0.5 text-sm text-primary-foreground/90">No charge to play today.</div>}
             <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-sm text-primary-foreground/70">
               <span className="inline-flex items-center gap-1.5">
                 <Clock className="size-3.5" /> Until {timeOf(s.session.closesAt)}
@@ -203,7 +214,13 @@ function SessionCard({ s, onChange }: { s: MySession; onChange: () => void }) {
           <div className="flex flex-col gap-2 sm:items-end">
             <Button size="lg" className="h-11 bg-brand px-5 text-base text-brand-foreground hover:bg-brand/90" disabled={busy} onClick={checkIn}>
               {busy && !ask && <Spinner />}
-              {s.payState === 'covered' ? 'Check in · covered by pass' : s.payState === 'blocked' ? 'Pay to check in' : 'Check in'}
+              {s.payState === 'covered'
+                ? 'Check in · covered by pass'
+                : s.payState === 'free'
+                  ? 'Check in · free today'
+                  : s.payState === 'blocked'
+                    ? 'Pay to check in'
+                    : 'Check in'}
             </Button>
             {s.payState === 'blocked' && (
               <div className="text-sm text-primary-foreground/80">Your balance is {balanceText(s.balanceCents)}. Pay to check in.</div>
@@ -331,7 +348,13 @@ function HistoryCard({ checkins, payments }: { checkins: any[]; payments: any[] 
                       <TableCell className="font-medium">{dateOf(c.at)}</TableCell>
                       <TableCell className="text-muted-foreground">{timeOf(c.at)}</TableCell>
                       <TableCell className="tabular text-right">
-                        {c.coveredBy ? <Badge variant="secondary">{planName(c.coveredBy)}</Badge> : money(c.feeCents ?? 0)}
+                        {c.coveredBy ? (
+                          <Badge variant="secondary">{planName(c.coveredBy)}</Badge>
+                        ) : c.freeDay ? (
+                          <Badge className="bg-success/12 text-success">Free day</Badge>
+                        ) : (
+                          money(c.feeCents ?? 0)
+                        )}
                       </TableCell>
                     </TableRow>
                   ))}

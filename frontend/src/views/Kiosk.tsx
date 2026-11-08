@@ -15,6 +15,7 @@ import {
   CheckCircle2,
   Clock,
   CreditCard,
+  Gift,
   Lock,
   Mail,
   QrCode,
@@ -201,7 +202,9 @@ export function Kiosk() {
       title,
       detail: r.pass
         ? `Covered by your ${planName(r.pass.plan).toLowerCase()} through ${ymdText(r.pass.end)}.`
-        : r.result === 'already'
+        : r.freeDay
+          ? `It’s a free day, so there’s no charge today. Balance ${balanceText(bal)}.`
+          : r.result === 'already'
           ? `Balance: ${balanceText(bal)}`
           : bal < 0
             ? `Balance ${balanceText(bal)}. You can carry up to −${money(r.limitCents ?? 1000)}; after that you can't check in until you pay.`
@@ -469,8 +472,15 @@ export function Kiosk() {
                   <div className="text-sm font-medium text-primary-foreground/60">In the gym</div>
                   <div className="tabular text-6xl font-semibold tracking-tight">{attendees.length}</div>
                 </div>
-                <div className="flex items-center gap-1.5 rounded-full bg-white/10 px-3 py-1.5 text-sm">
-                  <Clock className="size-3.5" /> until {timeOf(session.closesAt)}
+                <div className="flex flex-col items-end gap-2">
+                  {session.free && (
+                    <div className="flex items-center gap-1.5 rounded-full bg-success px-3 py-1.5 text-sm font-medium text-white">
+                      <Gift className="size-3.5" /> Free day
+                    </div>
+                  )}
+                  <div className="flex items-center gap-1.5 rounded-full bg-white/10 px-3 py-1.5 text-sm">
+                    <Clock className="size-3.5" /> until {timeOf(session.closesAt)}
+                  </div>
                 </div>
               </div>
               <div className="mt-6 -mr-2 flex-1 overflow-y-auto pr-2 max-lg:max-h-36">

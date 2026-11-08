@@ -17,6 +17,7 @@ import {
   QrCode,
   Search,
   ShieldCheck,
+  Gift,
   Tablet,
   Ticket,
   Trash2,
@@ -305,6 +306,43 @@ function SessionsTab() {
   const [current, setCurrent] = useState<{ session: AdminSession; attendees: Attendee[] } | null>(null);
   const [viewing, setViewing] = useState<{ session: AdminSession; attendees?: Attendee[] } | null>(null);
   const [busy, setBusy] = useState(false);
+  const [openFree, setOpenFree] = useState(false);
+
+  async function toggleFree(s: AdminSession) {
+    const paid = current?.attendees.filter((a) => a.feeCents > 0) ?? [];
+    const ok = await confirm(
+      s.free
+        ? {
+            title: 'End the free day?',
+            description: 'Anyone who checks in from now on pays the usual fee. People who already checked in free stay free.',
+            confirmLabel: 'End free day',
+          }
+        : {
+            title: 'Make this a free day?',
+            description:
+              'Checking in costs nothing for the rest of this session, and the negative-balance limit doesn’t apply.' +
+              (paid.length
+                ? ` ${paid.length} player${paid.length === 1 ? '' : 's'} already paid ${money(paid.reduce((t, a) => t + a.feeCents, 0))} for today and will get it back.`
+                : ''),
+            confirmLabel: 'Make it free',
+          },
+    );
+    if (!ok) return;
+    setBusy(true);
+    try {
+      const r = await api.setFreeDay(s.sessionId, !s.free);
+      toast.success(
+        s.free
+          ? 'Free day ended. Check-ins cost the usual fee again.'
+          : `It’s a free day!${r.refunded ? ` Refunded ${money(r.refundedCents)} to ${r.refunded} player${r.refunded === 1 ? '' : 's'}.` : ''}`,
+      );
+      await load();
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
 
   const load = useCallback(async () => {
     try {
@@ -325,8 +363,9 @@ function SessionsTab() {
   async function openGym() {
     setBusy(true);
     try {
-      await api.openSession();
-      toast.success('Session opened. Players can check in now.');
+      await api.openSession(openFree);
+      toast.success(openFree ? 'Free day! Session opened. Check-in costs nothing today.' : 'Session opened. Players can check in now.');
+      setOpenFree(false);
       await load();
     } catch (e: any) {
       toast.error(e.message);
@@ -382,12 +421,20 @@ function SessionsTab() {
                 <span className="relative inline-flex size-2.5 rounded-full bg-success" />
               </span>
               Gym is open
+              {current.session.free && (
+                <Badge className="bg-success/12 text-success">
+                  <Gift /> Free day
+                </Badge>
+              )}
             </CardTitle>
             <CardDescription>
               Opened {timeOf(current.session.openedAt)} by {current.session.openedByName} · closes automatically at{' '}
               {timeOf(current.session.closesAt)}
             </CardDescription>
-            <CardAction>
+            <CardAction className="flex flex-wrap justify-end gap-2">
+              <Button variant="outline" disabled={busy} onClick={() => toggleFree(current.session)}>
+                <Gift /> {current.session.free ? 'End free day' : 'Make it a free day'}
+              </Button>
               <Button variant="destructive" disabled={busy} onClick={() => closeGym(current.session.sessionId)}>
                 <DoorClosed /> Close
               </Button>
@@ -413,9 +460,20 @@ function SessionsTab() {
                 <div className="text-sm text-muted-foreground">Check-in is off at the kiosk and on player pages.</div>
               </div>
             </div>
-            <Button size="lg" disabled={busy} onClick={openGym}>
-              {busy ? <Spinner /> : <DoorOpen />} Open session
-            </Button>
+            <div className="flex flex-col items-stretch gap-2 sm:items-end">
+              <Button size="lg" disabled={busy} onClick={openGym}>
+                {busy ? <Spinner /> : openFree ? <Gift /> : <DoorOpen />} {openFree ? 'Open free day' : 'Open session'}
+              </Button>
+              <label className="flex cursor-pointer items-center gap-2 text-sm text-muted-foreground">
+                <input
+                  type="checkbox"
+                  checked={openFree}
+                  onChange={(e) => setOpenFree(e.target.checked)}
+                  className="size-4 accent-[var(--primary)]"
+                />
+                Free day (no charge to check in)
+              </label>
+            </div>
           </CardContent>
         </Card>
       )}
@@ -445,6 +503,7 @@ function SessionsTab() {
                     <TableCell className="text-muted-foreground">
                       {timeOf(s.openedAt)} – {s.open ? 'now' : s.endedAt ? timeOf(s.endedAt) : ''}
                       {s.open && <Badge className="ml-2 bg-success/12 text-success">Open</Badge>}
+                      {s.free && <Badge className="ml-2 bg-brand/12 text-brand">Free day</Badge>}
                       {s.autoClosed && <span className="ml-2 text-xs">auto-closed</span>}
                     </TableCell>
                     <TableCell className="hidden text-muted-foreground sm:table-cell">{s.openedByName}</TableCell>
@@ -515,7 +574,13 @@ function AttendeeTable({ attendees }: { attendees: Attendee[] }) {
             </TableCell>
             <TableCell className="text-muted-foreground">{timeOf(a.at)}</TableCell>
             <TableCell className="tabular text-right">
-              {a.coveredBy ? <Badge variant="secondary">{planName(a.coveredBy)}</Badge> : money(a.feeCents)}
+              {a.coveredBy ? (
+                <Badge variant="secondary">{planName(a.coveredBy)}</Badge>
+              ) : a.freeDay ? (
+                <Badge className="bg-success/12 text-success">Free day</Badge>
+              ) : (
+                money(a.feeCents)
+              )}
             </TableCell>
           </TableRow>
         ))}
