@@ -73,7 +73,7 @@ export class OakhurstStack extends cdk.Stack {
 
     // ───────────────────────────── Cognito ───────────────────────────────────
     // Admin + Player are real Cognito users, separated by group. Free < 10k MAU.
-    const siteName = apex ?? 'the Oakhurst Basketball site';
+    const siteName = apex ? `https://${apex}` : 'the Oakhurst Basketball site';
     const userPool = new cognito.UserPool(this, 'UserPool', {
       userPoolName: 'oakhurst-users',
       selfSignUpEnabled: true, // players can register themselves
@@ -84,19 +84,19 @@ export class OakhurstStack extends cdk.Stack {
       userVerification: {
         emailSubject: 'Your Oakhurst Basketball verification code',
         emailBody:
-          'Welcome to Oakhurst Basketball! 🏀<br/><br/>' +
+          'Welcome to Oakhurst Basketball!<br/><br/>' +
           'Your verification code is <strong>{####}</strong>.<br/><br/>' +
-          `Enter it on ${siteName} to finish creating your account. ` +
-          'If you did not sign up, you can ignore this email.',
+          `Enter it on the sign-up screen at ${siteName} to finish creating your account. ` +
+          'The code expires in 24 hours. If you didn’t sign up, you can ignore this email.',
         emailStyle: cognito.VerificationEmailStyle.CODE,
       },
       userInvitation: {
         emailSubject: 'You have been added to Oakhurst Basketball',
         emailBody:
-          'You have been added to Oakhurst Basketball 🏀<br/><br/>' +
+          'You have been added to Oakhurst Basketball.<br/><br/>' +
           'Username: <strong>{username}</strong><br/>' +
           'Temporary password: <strong>{####}</strong><br/><br/>' +
-          `Sign in at ${siteName} to set your own password.`,
+          `Sign in at ${siteName} and choose a new password. This temporary password expires in 7 days.`,
       },
       standardAttributes: {
         email: { required: true, mutable: true },
@@ -110,7 +110,7 @@ export class OakhurstStack extends cdk.Stack {
         requireUppercase: false,
         requireSymbols: false,
       },
-      // Email/TOTP only — no SMS MFA (SMS MFA is a per-message cost).
+      // Authenticator-app (TOTP) only; no SMS MFA (SMS is a per-message cost).
       mfa: cognito.Mfa.OPTIONAL,
       mfaSecondFactor: { sms: false, otp: true },
       accountRecovery: cognito.AccountRecovery.EMAIL_ONLY,
@@ -388,7 +388,7 @@ export class OakhurstStack extends cdk.Stack {
     }
 
     const appBaseUrl = apex ? `https://${apex}` : httpApi.apiEndpoint;
-    apiFn.addEnvironment('APP_BASE_URL', appBaseUrl); // used in the SMS confirm link
+    apiFn.addEnvironment('APP_BASE_URL', appBaseUrl); // used in the emailed confirm link
     confirmFn.addEnvironment('APP_BASE_URL', appBaseUrl);
     // Only with a custom domain: the fallback is the API endpoint, which would make
     // the Cognito trigger depend on the API (a CloudFormation cycle). push.ts falls

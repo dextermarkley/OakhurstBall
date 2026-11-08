@@ -5,13 +5,13 @@
 An admin posts today's announcement from Admin → Overview or Admin → Sessions.
 The text starts as **"Ball today OCI - 5:30"** and can be edited before posting.
 
-- Posting shows it at the top of every player page with **I'm in** and
-  **Can't make it** buttons and the list of who's in, and sends a notification
+- Posting shows it at the top of every player page with **I'm in**,
+  **Maybe** and **Can't make it** buttons and the list of who's in, and sends a notification
   to every device with notifications on (except the poster's).
 - Tapping your RSVP again clears it.
 - Editing keeps the RSVPs. "Notify everyone about the change" is on by default.
 - Taking it down removes it from player pages without notifying anyone.
-- It is only for the day it was posted and disappears at midnight Pacific.
+- It is only for the day it was posted and disappears at midnight club time (Pacific by default).
   Posting a new one replaces it and starts the RSVPs fresh.
 
 Storage: `CURRENT/ANNOUNCE` points at `ANN#<id>/META`; RSVPs are

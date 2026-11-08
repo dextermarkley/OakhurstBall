@@ -61,8 +61,8 @@ const NAME = z
 
 const schema = z
   .object({
-    agreeRules: z.boolean().refine((v) => v, 'Please acknowledge the club rules'),
-    adult: z.enum(['yes', 'no'], { message: 'Choose one' }),
+    agreeRules: z.boolean().refine((v) => v, 'Please acknowledge the Club Rules and Play Rules'),
+    adult: z.enum(['yes', 'no'], { message: 'Choose Yes or No' }),
     signedName: NAME,
     guardianName: z.string().trim().max(100).optional(),
     agreeWaiver: z.boolean().refine((v) => v, 'Please agree to the waiver to continue'),
@@ -141,14 +141,14 @@ export function SignScreen({
             <LogoMark className="size-10" />
             <div>
               <h1 className="text-xl font-semibold tracking-tight">
-                {heading ?? (changed ? 'Our waiver or rules changed' : 'One more step')}
+                {heading ?? (changed ? 'The waiver or rules have changed' : 'One more step')}
               </h1>
               <p className="text-sm text-muted-foreground">
-                {changed ? 'Please read and sign the updated version to keep playing.' : 'Every player signs the waiver and agrees to the club rules before playing.'}
+                {changed ? 'Please read and sign the updated version to keep playing.' : 'Every player signs the waiver and agrees to the Club Rules and Play Rules before playing.'}
               </p>
             </div>
           </div>
-          <Button variant="ghost" size="sm" onClick={exit.onClick}>
+          <Button variant="ghost" size="sm" onClick={exit.onClick} aria-label={exit.label}>
             {exit.icon} <span className="hidden sm:inline">{exit.label}</span>
           </Button>
         </div>
@@ -226,7 +226,7 @@ export function SignScreen({
                     control={form.control}
                     name="guardianName"
                     label="Parent or guardian’s full name"
-                    description="The parent or guardian signs on the player’s behalf and their own."
+                    description="The parent or guardian signs for the player and for themselves."
                   />
                 )}
                 <CheckRow
@@ -365,16 +365,23 @@ function TextField({
 /** Read-only view of the signed documents (account menu → Waiver & rules). */
 export function AgreementsDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [s, setS] = useState<AgreementsStatus | null>(null);
+  const [failed, setFailed] = useState(false);
   useEffect(() => {
-    if (open && !s) api.agreements().then(setS).catch((e) => toast.error(e.message));
+    if (open && !s) {
+      setFailed(false);
+      api.agreements().then(setS).catch((e) => {
+        setFailed(true);
+        toast.error(e.message);
+      });
+    }
   }, [open, s]);
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-xl">
         <DialogHeader>
-          <DialogTitle>Waiver & club rules</DialogTitle>
+          <DialogTitle>Waiver and Club Rules</DialogTitle>
           <DialogDescription>
-            {s?.signed ? `Signed by ${s.signed.signedName} on ${longDateOf(s.signed.agreedAt)}.` : s ? 'Not signed yet.' : 'Loading…'}
+            {s?.signed ? `Signed by ${s.signed.signedName} on ${longDateOf(s.signed.agreedAt)}.` : s ? 'Not signed yet.' : failed ? 'Couldn’t load the documents. Close this and try again.' : 'Loading…'}
           </DialogDescription>
         </DialogHeader>
         {s && (

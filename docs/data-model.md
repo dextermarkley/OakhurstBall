@@ -8,7 +8,7 @@ A GSI (`GSI1PK`/`GSI1SK`) supports the few access patterns that cut across parti
 ### Player
 - `PK = PLAYER#<playerId>`
 - `SK = PROFILE`
-- Attributes: `playerId`, `name`, `email`, `phone`, `pinHash` (bcrypt of kiosk PIN),
+- Attributes: `playerId`, `name`, `email`, `phone`, `pinHash` (scrypt of kiosk PIN),
   `balanceCents` (int; negative = owes money), `cognitoSub` (if they have a login),
   `active`, `createdAt`, `updatedAt`
 - `GSI1PK = PLAYER`, `GSI1SK = <lowercase name>` — list/search all players (kiosk picker)
@@ -16,22 +16,23 @@ A GSI (`GSI1PK`/`GSI1SK`) supports the few access patterns that cut across parti
 ### Admin
 - `PK = ADMIN#<adminId>`
 - `SK = PROFILE`
-- Attributes: `adminId`, `name`, `phone` (E.164, for SNS), `cognitoSub`, `active`
+- Attributes: `adminId`, `name`, `email` (cash-confirm address), `cognitoSub`, `active`
 - `GSI1PK = ADMIN`, `GSI1SK = <lowercase name>` — list admins (cash-payment picker)
 
 ### Check-in
 - `PK = PLAYER#<playerId>`
 - `SK = CHECKIN#<isoTimestamp>`
-- Attributes: `playerId`, `eventDate` (YYYY-MM-DD), `at` (iso), `source` (kiosk)
+- Attributes: `playerId`, `eventDate` (YYYY-MM-DD), `at` (iso), `source` (kiosk|player)
 - `GSI1PK = EVENT#<eventDate>`, `GSI1SK = CHECKIN#<isoTimestamp>` — roster for a game
 
 ### Payment (ledger entry — immutable once confirmed)
 - `PK = PLAYER#<playerId>`
 - `SK = PAYMENT#<isoTimestamp>#<paymentId>`
-- Attributes: `paymentId`, `playerId`, `amountCents`, `method` (cash|venmo|card),
+- Attributes: `paymentId`, `playerId`, `amountCents`, `method` (cash|card),
   `status` (pending|confirmed|denied|expired), `adminId` (who must confirm),
   `confirmToken` (opaque, for magic link), `confirmTokenExpiresAt` (epoch, TTL),
-  `createdAt`, `confirmedAt`, `note`
+  `createdAt`, `confirmedAt`, `note`; for a pass purchase also `plan`,
+  `periodId`, `periodLabel`, `periodStart`, `periodEnd`, `creditedInstead`
 - `GSI1PK = PAYMENT_STATUS#<status>`, `GSI1SK = <isoTimestamp>` — admin "pending" queue
 
 ### Confirm-token lookup (for the magic link)
@@ -44,6 +45,9 @@ A GSI (`GSI1PK`/`GSI1SK`) supports the few access patterns that cut across parti
 - `PK = KIOSK#<deviceId>`
 - `SK = PROFILE`
 - Attributes: `deviceId`, `label`, `deviceSecretHash`, `active`, `lastSeenAt`
+
+Passes, sessions, announcements, chat and expenses have their own items: see
+[payments.md](payments.md) and [community.md](community.md).
 
 ## Balance semantics
 

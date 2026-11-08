@@ -125,8 +125,8 @@ export function checkSignature(b: any): { sig?: { signedName: string; adult: boo
   if (b?.waiverVersion !== WAIVER.version || b?.rulesVersion !== RULES.version) {
     return { error: 'The waiver or rules changed. Reload the page and read the current version.' };
   }
-  if (b?.agreeRules !== true) return { error: 'Please acknowledge the club rules' };
-  if (b?.agreeWaiver !== true) return { error: 'Please agree to the waiver' };
+  if (b?.agreeRules !== true) return { error: 'Check the box to confirm you’ve read the club rules' };
+  if (b?.agreeWaiver !== true) return { error: 'Check the box to agree to the waiver' };
   const clean = (v: unknown) => String(v ?? '').replace(/\s+/g, ' ').trim();
   const signedName = clean(b?.signedName);
   if (signedName.length < 3 || signedName.length > 100 || !/\s/.test(signedName)) {

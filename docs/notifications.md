@@ -12,6 +12,10 @@ free. There is no push vendor and no fixed cost.
 | An admin opens a session | Everyone with notifications on, except that admin | `/player` |
 | Someone records cash for an admin (kiosk or player page) | That admin | `/confirm/<token>` |
 | A payment is confirmed (cash or card) or a cash payment is denied | The player | `/player` |
+| A new announcement is posted (or edited, when the admin chooses to notify) | Everyone with notifications on, except the poster | `/player` |
+| An admin approves a player's account | That player | `/chat` |
+| A new player signs up | Admins | `/admin?tab=players` |
+| A chat message is posted (opt-in per player) | Other members who turned on chat notifications | `/chat` |
 | "Send test" (automatic when turning notifications on) | The caller | `/player` or `/admin` |
 
 Admins are matched by their Cognito user or by the login email on their admin

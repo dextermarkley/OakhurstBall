@@ -118,7 +118,7 @@ export function ExpensesTab() {
         </div>
       ) : (
         <>
-          {r.facilityThisMonth === false && (
+          {r.facilityThisMonth === false && r.season.current && Number(r.today.slice(8, 10)) > 5 && (
             <Alert>
               <CalendarClock />
               <AlertTitle>No facility payment recorded for {MONTH(r.today)} yet</AlertTitle>
@@ -143,11 +143,11 @@ export function ExpensesTab() {
               hint="Confirmed card and cash"
             />
             <StatCard
-              label={net < 0 ? 'Short this season' : 'Left over this season'}
+              label={net < 0 ? 'Short this season' : 'Payments minus expenses'}
               icon={Receipt}
               tone={net < 0 ? 'danger' : 'default'}
               value={<span className={cn(net < 0 && 'text-destructive')}>{net < 0 ? '−' : ''}{money(net)}</span>}
-              hint="Payments received minus expenses"
+              hint="Includes credit players haven’t used yet"
             />
             {r.season.current ? (
               <StatCard label={`Spent in ${MONTH(r.today)}`} icon={CalendarClock} value={money(r.monthCents)} hint="This month" />
@@ -165,7 +165,8 @@ export function ExpensesTab() {
               <CardContent className="space-y-4">
                 {ORDER.map((c) => {
                   const v = r.byCategory[c] ?? 0;
-                  const pct = r.totalCents ? Math.round((v / r.totalCents) * 100) : 0;
+                  const rawPct = r.totalCents ? (v / r.totalCents) * 100 : 0;
+                  const pct = v > 0 ? Math.max(1, Math.round(rawPct)) : 0;
                   const Icon = CATS[c].icon;
                   return (
                     <div key={c}>
@@ -173,7 +174,9 @@ export function ExpensesTab() {
                         <span className="flex items-center gap-2">
                           <Icon className="size-4 text-muted-foreground" /> {CATS[c].label}
                         </span>
-                        <span className="tabular font-medium">{money(v)}</span>
+                        <span className="tabular font-medium">
+                          {money(v)} <span className="text-xs font-normal text-muted-foreground">· {pct}%</span>
+                        </span>
                       </div>
                       <div className="h-2 overflow-hidden rounded-full bg-muted">
                         <div className={cn('h-full rounded-full', CATS[c].color)} style={{ width: `${pct}%` }} />
@@ -305,8 +308,15 @@ function ExpenseDialog({
     },
   });
   const cat = form.watch('category');
+  const date = form.watch('date');
 
-  // Switching category on a new expense suggests that category's usual amount.
+  // Keep the suggested facility note in step with the chosen date (unless the user typed their own).
+  useEffect(() => {
+    if (expense || form.getValues('category') !== 'facility' || form.getFieldState('note').isDirty || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return;
+    form.setValue('note', `${MONTH(date)} gym rental`);
+  }, [date, expense, form]);
+
+  // Switching category on a new expense suggests that category’s usual amount.
   function pick(c: ExpenseCategory) {
     form.setValue('category', c);
     if (!expense) {

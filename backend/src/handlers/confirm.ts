@@ -22,17 +22,17 @@ export const handler = async (
     if (m === 'OPTIONS') return ok({});
 
     const token = tokenFromPath(path);
-    if (!token) return badRequest('missing token');
+    if (!token) return badRequest('This confirmation link is incomplete');
 
     if (m === 'GET') {
       const resolved = await resolveToken(token);
-      if (!resolved) return notFound('This confirmation link is expired or already used.');
+      if (!resolved) return notFound('This confirmation link has expired or was already used.');
       const player = await getPlayer(resolved.playerId);
       return ok({
         status: resolved.payment.status,
         amountCents: resolved.payment.amountCents,
         method: resolved.payment.method,
-        playerName: player?.name ?? 'player',
+        playerName: player?.name ?? 'Unknown player',
         note: resolved.payment.note,
         createdAt: resolved.payment.createdAt,
       });
@@ -42,13 +42,13 @@ export const handler = async (
       const { action } = parseBody(event);
       if (action === 'confirm') {
         const r = await confirmPayment(token);
-        if (r === 'gone') return notFound('Link expired or already used.');
+        if (r === 'gone') return notFound('This confirmation link has expired or was already used.');
         if (r === 'already') return ok({ result: 'already_handled' });
         return ok({ result: 'confirmed' });
       }
       if (action === 'deny') {
         const r = await denyPayment(token);
-        if (r === 'gone') return notFound('Link expired or already used.');
+        if (r === 'gone') return notFound('This confirmation link has expired or was already used.');
         if (r === 'already') return ok({ result: 'already_handled' });
         return ok({ result: 'denied' });
       }

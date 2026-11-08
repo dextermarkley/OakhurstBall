@@ -45,6 +45,7 @@ function ChatRoom({ isAdmin }: { isAdmin: boolean }) {
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [mySub, setMySub] = useState('');
   const [error, setError] = useState('');
+  const [notifyHelp, setNotifyHelp] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
   const [viewer, setViewer] = useState<ChatMessage | null>(null);
   const since = useRef('');
@@ -128,7 +129,7 @@ function ChatRoom({ isAdmin }: { isAdmin: boolean }) {
   async function remove(m: ChatMessage) {
     const ok = await confirm({
       title: 'Delete this message?',
-      description: m.sub === mySub ? 'It is removed for everyone.' : `This removes ${m.name}'s message for everyone.`,
+      description: m.sub === mySub ? 'This removes it for everyone.' : `This removes ${m.name}’s message for everyone.`,
       confirmLabel: 'Delete',
       destructive: true,
     });
@@ -153,6 +154,10 @@ function ChatRoom({ isAdmin }: { isAdmin: boolean }) {
           else, like checking in and paying, works now.
         </p>
         <p className="text-xs text-muted-foreground">Turn on notifications and we’ll let you know when you’re approved.</p>
+        <Button size="sm" variant="outline" onClick={() => setNotifyHelp(true)}>
+          <Bell /> Turn on notifications
+        </Button>
+        <NotifyHelpDialog open={notifyHelp} onClose={() => setNotifyHelp(false)} isAdmin={isAdmin} />
       </div>
     );
   }
@@ -168,7 +173,7 @@ function ChatRoom({ isAdmin }: { isAdmin: boolean }) {
         <MessagesSquare className="size-4 text-brand" />
         <div className="flex-1">
           <div className="text-sm font-semibold">Oakhurst chat</div>
-          <div className="text-xs text-muted-foreground">Memes, logistics, anything. Everyone in the club can see it.</div>
+          <div className="text-xs text-muted-foreground">Memes, logistics, anything. Every approved member can see it.</div>
         </div>
         <ChatNotifyToggle isAdmin={isAdmin} />
       </div>
@@ -182,7 +187,7 @@ function ChatRoom({ isAdmin }: { isAdmin: boolean }) {
         }}
       >
         {error ? (
-          <p className="py-10 text-center text-sm text-destructive">{error}</p>
+          <p className="py-10 text-center text-sm text-destructive">Couldn’t load the chat. Check your connection and reload.</p>
         ) : !messages ? (
           <div className="flex justify-center py-10">
             <Spinner className="size-5 text-muted-foreground" />
@@ -214,7 +219,7 @@ function ChatRoom({ isAdmin }: { isAdmin: boolean }) {
         )}
       </div>
 
-      <Composer onSent={onSent} />
+      {messages && !error && <Composer onSent={onSent} />}
 
       <Dialog open={!!viewer} onOpenChange={(o) => !o && setViewer(null)}>
         <DialogContent className="max-h-[92dvh] w-auto max-w-[min(96vw,1100px)] p-2 sm:max-w-[min(96vw,1100px)]">
@@ -340,7 +345,7 @@ function ChatImage({ m, onOpen }: { m: ChatMessage; onOpen: (e: React.MouseEvent
   const style = w && h ? { width: Math.round(w * scale), height: Math.round(h * scale) } : { maxWidth: maxW, maxHeight: maxH };
   return (
     <button type="button" onClick={onOpen} aria-label="View full size" className="block cursor-zoom-in bg-muted outline-none focus-visible:ring-3 focus-visible:ring-ring/50">
-      <img src={m.image!.url} alt={m.text ? m.text.slice(0, 80) : `Photo from ${m.name}`} loading="lazy" style={style} className="block object-cover" />
+      <img src={m.image!.url} alt={m.text ? '' : `Photo from ${m.name}`} loading="lazy" style={style} className="block object-cover" />
     </button>
   );
 }
@@ -441,7 +446,7 @@ function Composer({ onSent }: { onSent: (m: ChatMessage) => void }) {
   async function send() {
     const t = text.trim();
     if ((!t && !att) || sending) return;
-    if (t.length > MAX_TEXT) return void toast.error(`Keep it under ${MAX_TEXT} characters.`);
+    if (t.length > MAX_TEXT) return void toast.error(`Messages can be up to ${MAX_TEXT.toLocaleString('en-US')} characters.`);
     setSending(true);
     try {
       let imageKey: string | undefined;
@@ -586,13 +591,14 @@ function ChatNotifyToggle({ isAdmin }: { isAdmin: boolean }) {
       <Button
         variant={on ? 'secondary' : 'outline'}
         size="sm"
+        aria-label="Chat notifications"
         aria-pressed={on}
         disabled={busy}
         onClick={toggle}
         title={on ? 'Turn off chat notifications' : 'Get a notification for new messages'}
       >
         {busy ? <Spinner /> : on ? <Bell /> : <BellOff />}
-        <span className="hidden sm:inline">{on ? 'Notifying me' : 'Notify me'}</span>
+        <span className="hidden sm:inline">{on ? 'Notifications on' : 'Notifications off'}</span>
         <span className="sm:hidden">{on ? 'On' : 'Off'}</span>
       </Button>
       <NotifyHelpDialog open={help} onClose={() => setHelp(false)} isAdmin={isAdmin} />

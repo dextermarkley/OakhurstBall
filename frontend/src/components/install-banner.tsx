@@ -48,7 +48,7 @@ export function InstallBanner() {
         >
           <LogoMark className="size-10 shrink-0" />
           <div className="min-w-0 flex-1">
-            <div className="font-medium">Get the Oakhurst app</div>
+            <div className="font-medium">Install the Oakhurst app</div>
             <div className="text-muted-foreground">
               {s.kind === 'in-app' ? 'Open this page in your browser to install it.' : 'Add it to your home screen for quick check-in and notifications.'}
             </div>
@@ -86,7 +86,7 @@ export function InstallHelpDialog({ open, onClose, kind }: { open: boolean; onCl
           <div className="mb-1 flex items-center gap-3">
             <LogoMark className="size-10" />
             <div>
-              <DialogTitle>{kind === 'in-app' ? 'Open in your browser' : 'Install Oakhurst Basketball'}</DialogTitle>
+              <DialogTitle>{kind === 'in-app' ? 'Open in your browser' : 'Install the Oakhurst app'}</DialogTitle>
               <DialogDescription className="mt-1">{platformLabel(kind)}</DialogDescription>
             </div>
           </div>
@@ -101,16 +101,18 @@ export function InstallHelpDialog({ open, onClose, kind }: { open: boolean; onCl
             </li>
           ))}
         </ol>
-        <p className="text-xs text-muted-foreground">
-          Then open Oakhurst from your home screen. It works like an app, signs you in faster, and can send you notifications.
-        </p>
+        {kind !== 'in-app' && (
+          <p className="text-xs text-muted-foreground">Then open Oakhurst from your home screen. Notifications work from the installed app.</p>
+        )}
         <DialogFooter>
           {kind === 'in-app' && (
             <Button
               variant="outline"
               onClick={() =>
-                navigator.clipboard
-                  ?.writeText(window.location.href)
+                (navigator.clipboard
+                  ? navigator.clipboard.writeText(window.location.href)
+                  : Promise.reject(new Error('no clipboard'))
+                )
                   .then(() => toast.success('Link copied. Paste it into Safari or Chrome.'))
                   .catch(() => toast.error('Couldn’t copy. Use the menu to open in your browser.'))
               }

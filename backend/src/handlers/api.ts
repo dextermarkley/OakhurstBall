@@ -138,9 +138,9 @@ const passView = (p: Pass | null) =>
  */
 async function planBlocked(playerId: string, plan: Plan, asAdmin = false): Promise<string | null> {
   const offer = purchasable(await coveringPass(playerId)).find((o) => o.plan === plan)!;
-  if (offer.status === 'owned') return `Already covered for ${offer.label}`;
+  if (offer.status === 'owned') return `You already have a pass for ${offer.label}`;
   if (offer.status === 'not_offered' && !asAdmin) {
-    return 'The year pass is only sold Apr 1 – Jun 30. Buy a quarter pass instead.';
+    return 'The year pass is only available Apr 1 – Jun 30. Buy a quarter pass instead.';
   }
   return null;
 }
@@ -209,10 +209,10 @@ async function stripeRouter(
       s = await retrieveCheckoutSession(sessionId);
     } catch (err) {
       if (err instanceof StripeNotConfigured) throw err;
-      return notFound('payment'); // unknown or malformed session id
+      return notFound('Payment not found'); // unknown or malformed session id
     }
     const paymentId = s.metadata?.paymentId;
-    if (!paymentId) return notFound('payment');
+    if (!paymentId) return notFound('Payment not found');
     const status = await syncCardPayment(paymentId);
     return ok({ status, amountCents: s.amount_total });
   }
@@ -300,7 +300,7 @@ async function kioskRouter(
     const { playerId, pin } = parseBody(event);
     if (!playerId || !pin) return badRequest('playerId and pin required');
     const player = await getPlayer(playerId);
-    if (!player) return notFound('player');
+    if (!player) return notFound('Player not found');
     if (!player.pinHash || !verifySecret(String(pin), player.pinHash)) {
       return unauthorized('wrong PIN');
     }
@@ -326,7 +326,7 @@ async function kioskRouter(
     const b = parseBody(event);
     if (!b.playerId || !b.pin) return badRequest('playerId and pin required');
     const player = await getPlayer(String(b.playerId));
-    if (!player) return notFound('player');
+    if (!player) return notFound('Player not found');
     if (!player.pinHash || !verifySecret(String(b.pin), player.pinHash)) return unauthorized('wrong PIN');
     const { sig, error } = checkSignature(b);
     if (error) return badRequest(error);
@@ -344,11 +344,11 @@ async function kioskRouter(
   if (path === '/kiosk/pay' && m === 'POST') {
     const { playerId, pin, method: pm, adminId, plan: rawPlan, amountCents: rawAmount } = parseBody(event);
     if (!playerId || !pin) return badRequest('playerId and pin required');
-    if (pm !== 'card' && pm !== 'cash') return badRequest("method must be 'card' or 'cash'");
-    if (rawPlan != null && !isPlan(rawPlan)) return badRequest("plan must be 'quarter' or 'year'");
+    if (pm !== 'card' && pm !== 'cash') return badRequest('Choose card or cash');
+    if (rawPlan != null && !isPlan(rawPlan)) return badRequest('Choose a quarter pass or a year pass');
     const plan = (rawPlan ?? undefined) as Plan | undefined;
     const player = await getPlayer(playerId);
-    if (!player) return notFound('player');
+    if (!player) return notFound('Player not found');
     if (!player.pinHash || !verifySecret(String(pin), player.pinHash)) {
       return unauthorized('wrong PIN');
     }
@@ -367,11 +367,11 @@ async function kioskRouter(
       return created({ paymentId: payment.paymentId, amountCents: payment.amountCents, checkoutUrl });
     }
 
-    if (!adminId) return badRequest('adminId required for cash');
+    if (!adminId) return badRequest('Pick who you handed the cash to');
     const credit = plan ? AMOUNTS.cash : cashCreditCents(rawAmount, AMOUNTS.cash);
     if (typeof credit === 'string') return badRequest(credit);
     const admin = await getAdmin(adminId);
-    if (!admin || !admin.active) return notFound('admin');
+    if (!admin || !admin.active) return notFound('Admin not found');
     const { payment, emailed } = await createCashPayment({
       playerId,
       playerName: player.name,
@@ -392,7 +392,7 @@ async function kioskRouter(
   const payMatch = path.match(/^\/kiosk\/payments\/([a-f0-9]{24})$/);
   if (payMatch && m === 'GET') {
     const found = await getPayment(payMatch[1]);
-    if (!found) return notFound('payment');
+    if (!found) return notFound('Payment not found');
     const status =
       found.payment.method === 'card' ? await syncCardPayment(payMatch[1]) : found.payment.status;
     const player = await getPlayer(found.playerId);
@@ -447,9 +447,9 @@ async function communityRouter(
       return badRequest("status must be 'in', 'maybe', 'out' or null");
     }
     const player = await getPlayerByCognitoSub(claims.sub);
-    if (!player) return notFound('no linked player profile');
+    if (!player) return notFound("We couldn’t find your player profile. Sign out and back in, or ask an admin.");
     const done = await setRsvp(String(announceId ?? ''), { playerId: player.playerId, name: player.name }, status);
-    if (!done) return json(409, { error: 'That announcement is no longer current' });
+    if (!done) return json(409, { error: 'That announcement has expired or been replaced' });
     return ok({ announcement: await currentAnnouncement() });
   }
 
@@ -472,10 +472,10 @@ async function communityRouter(
     const now = new Date().toISOString();
     await markChatSeen(claims.sub);
     if (q.after) {
-      if (!CURSOR_RE.test(q.after) || !ISO_RE.test(q.since ?? '')) return badRequest('bad cursor');
+      if (!CURSOR_RE.test(q.after) || !ISO_RE.test(q.since ?? '')) return badRequest('Couldn’t load the chat. Reload and try again.');
       return ok({ ...(await changesSince(q.after, q.since!)), now });
     }
-    if (q.before && !CURSOR_RE.test(q.before)) return badRequest('bad cursor');
+    if (q.before && !CURSOR_RE.test(q.before)) return badRequest('Couldn’t load the chat. Reload and try again.');
     return ok({ ...(await listMessages(q.before)), now, mySub: claims.sub });
   }
   if (path === '/api/chat' && m === 'POST') {
@@ -503,7 +503,7 @@ async function communityRouter(
   if (path === '/api/chat/delete' && m === 'POST') {
     const { cursor } = parseBody(event);
     const r = await deleteMessage(String(cursor ?? ''), { sub: claims.sub, isAdmin: admin });
-    if (r === 'notfound') return notFound('message');
+    if (r === 'notfound') return notFound('Message not found');
     if (r === 'forbidden') return forbidden();
     return ok({ deleted: true });
   }
@@ -555,7 +555,7 @@ async function apiRouter(
   // GET /api/me/balance — the signed-in player's own balance + history
   if (path === '/api/me/balance' && m === 'GET') {
     const player = await getPlayerByCognitoSub(claims.sub);
-    if (!player) return notFound('no linked player profile');
+    if (!player) return notFound("We couldn’t find your player profile. Sign out and back in, or ask an admin.");
     const [checkins, payments, passes] = await Promise.all([
       playerCheckins(player.playerId),
       playerPayments(player.playerId),
@@ -575,7 +575,7 @@ async function apiRouter(
   // GET /api/me/session — the open session and this player's status in it
   if (path === '/api/me/session' && m === 'GET') {
     const player = await getPlayerByCognitoSub(claims.sub);
-    if (!player) return notFound('no linked player profile');
+    if (!player) return notFound("We couldn’t find your player profile. Sign out and back in, or ask an admin.");
     const session = await currentSession();
     const [checkedIn, pass] = await Promise.all([
       session ? isCheckedIn(session.sessionId, player.playerId) : Promise.resolve(false),
@@ -611,7 +611,7 @@ async function apiRouter(
   // POST /api/me/checkin — check in to the open session from the player page
   if (path === '/api/me/checkin' && m === 'POST') {
     const player = await getPlayerByCognitoSub(claims.sub);
-    if (!player) return notFound('no linked player profile');
+    if (!player) return notFound("We couldn’t find your player profile. Sign out and back in, or ask an admin.");
     if (!isCurrent(player as any)) {
       return ok({ result: 'needs_agreement', name: player.name, signedBefore: !!(player as any).agreedAt });
     }
@@ -624,9 +624,9 @@ async function apiRouter(
   // no plan = $20 credit, 'quarter' / 'year' = pass for the current period.
   if (path === '/api/me/pay-card' && m === 'POST') {
     const player = await getPlayerByCognitoSub(claims.sub);
-    if (!player) return notFound('no linked player profile');
+    if (!player) return notFound("We couldn’t find your player profile. Sign out and back in, or ask an admin.");
     const { plan: rawPlan } = parseBody(event);
-    if (rawPlan != null && !isPlan(rawPlan)) return badRequest("plan must be 'quarter' or 'year'");
+    if (rawPlan != null && !isPlan(rawPlan)) return badRequest('Choose a quarter pass or a year pass');
     const plan = (rawPlan ?? undefined) as Plan | undefined;
     if (plan) {
       const blocked = await planBlocked(player.playerId, plan);
@@ -650,15 +650,15 @@ async function apiRouter(
   // chosen admin confirms by email (or on the Admin page), same as the kiosk.
   if (path === '/api/me/pay-cash' && m === 'POST') {
     const player = await getPlayerByCognitoSub(claims.sub);
-    if (!player) return notFound('no linked player profile');
+    if (!player) return notFound("We couldn’t find your player profile. Sign out and back in, or ask an admin.");
     const { adminId, plan: rawPlan, amountCents: rawAmount } = parseBody(event);
-    if (rawPlan != null && !isPlan(rawPlan)) return badRequest("plan must be 'quarter' or 'year'");
+    if (rawPlan != null && !isPlan(rawPlan)) return badRequest('Choose a quarter pass or a year pass');
     const plan = (rawPlan ?? undefined) as Plan | undefined;
-    if (!adminId) return badRequest('adminId required');
+    if (!adminId) return badRequest('Pick who you handed the cash to');
     const credit = plan ? AMOUNTS.cash : cashCreditCents(rawAmount, AMOUNTS.cash);
     if (typeof credit === 'string') return badRequest(credit);
     const adm = await getAdmin(String(adminId));
-    if (!adm || !adm.active) return notFound('admin');
+    if (!adm || !adm.active) return notFound('Admin not found');
     if (plan) {
       const blocked = await planBlocked(player.playerId, plan);
       if (blocked) return json(409, { error: blocked });
@@ -687,7 +687,10 @@ async function apiRouter(
   if (path === '/api/me/push' && m === 'POST') {
     const { subscription } = parseBody(event);
     const bad = checkSubscription(subscription);
-    if (bad) return badRequest(bad);
+    if (bad) {
+      console.warn('rejected push subscription:', bad);
+      return badRequest('Couldn’t turn on notifications on this device. Try again or use a different browser.');
+    }
     const player = await getPlayerByCognitoSub(claims.sub);
     await saveSubscription(subscription, {
       sub: claims.sub,
@@ -699,13 +702,13 @@ async function apiRouter(
   }
   if (path === '/api/me/push' && m === 'DELETE') {
     const { endpoint } = parseBody(event);
-    if (!endpoint) return badRequest('endpoint required');
+    if (!endpoint) return badRequest('Couldn’t turn on notifications on this device. Try again or use a different browser.');
     return ok({ removed: await deleteSubscription(String(endpoint), claims.sub) });
   }
   if (path === '/api/me/push/test' && m === 'POST') {
     const r = await sendPush(toUser(claims.sub), {
       title: 'Notifications are on',
-      body: "You'll hear from Oakhurst Basketball when the gym opens and when payments go through.",
+      body: "You’ll get a heads-up when the gym opens, announcements are posted, and payments are confirmed.",
       url: admin ? '/admin' : '/player',
       tag: 'test',
     });
@@ -735,7 +738,7 @@ async function apiRouter(
   }
   if (path === '/api/me/agreements' && m === 'POST') {
     const player = await getPlayerByCognitoSub(claims.sub);
-    if (!player) return notFound('no linked player profile');
+    if (!player) return notFound("We couldn’t find your player profile. Sign out and back in, or ask an admin.");
     const { sig, error } = checkSignature(parseBody(event));
     if (error) return badRequest(error);
     const agreedAt = await recordAgreements(player.playerId, sig!, {
@@ -751,19 +754,25 @@ async function apiRouter(
     const { pin } = parseBody(event);
     if (!/^\d{4,6}$/.test(String(pin ?? ''))) return badRequest('pin must be 4-6 digits');
     const player = await getPlayerByCognitoSub(claims.sub);
-    if (!player) return notFound('no linked player profile');
+    if (!player) return notFound("We couldn’t find your player profile. Sign out and back in, or ask an admin.");
     await setPlayerPin(player.playerId, hashSecret(String(pin)));
     return ok({ updated: true });
   }
 
   // ── Admin-only below ──
-  if (!admin) return forbidden('admin only');
+  if (!admin) return forbidden('Only admins can do this');
 
   // GET /api/admin/players — with each player's pass for the current period
   if (path === '/api/admin/players' && m === 'GET') {
-    const [players, holders] = await Promise.all([listPlayers(), currentPassHolders()]);
+    const [players, holders, admins] = await Promise.all([listPlayers(), currentPassHolders(), listAdminsDetailed()]);
+    // Admins always have chat access, so they never need approving.
+    const adminEmails = new Set(admins.map((a) => a.email?.toLowerCase()).filter(Boolean));
     return ok({
-      players: players.map((p) => ({ ...p, pass: passView(holders.get(p.playerId) ?? null) })),
+      players: players.map((p) => ({
+        ...p,
+        isAdmin: !!p.email && adminEmails.has(p.email.toLowerCase()),
+        pass: passView(holders.get(p.playerId) ?? null),
+      })),
       agreementVersions: { waiver: WAIVER.version, rules: RULES.version },
       plans: purchasable(null),
     });
@@ -773,8 +782,8 @@ async function apiRouter(
   const passMatch = path.match(/^\/api\/admin\/players\/([a-f0-9]{24})\/pass$/);
   if (passMatch && m === 'POST') {
     const { plan } = parseBody(event);
-    if (!isPlan(plan)) return badRequest("plan must be 'quarter' or 'year'");
-    if (!(await getPlayer(passMatch[1]))) return notFound('player');
+    if (!isPlan(plan)) return badRequest('Choose a quarter pass or a year pass');
+    if (!(await getPlayer(passMatch[1]))) return notFound('Player not found');
     const blocked = await planBlocked(passMatch[1], plan, true);
     if (blocked) return json(409, { error: blocked });
     const p = await grantPass(passMatch[1], plan, claims.name || claims.email || 'Admin');
@@ -786,7 +795,7 @@ async function apiRouter(
   // POST /api/admin/players  { name, email?, phone?, pin? }
   if (path === '/api/admin/players' && m === 'POST') {
     const { name, email, phone, pin } = parseBody(event);
-    if (!name) return badRequest('name required');
+    if (!name) return badRequest('Enter a name');
     const player = await createPlayer({
       name,
       email,
@@ -803,13 +812,13 @@ async function apiRouter(
     const { approved } = parseBody(event);
     if (typeof approved !== 'boolean') return badRequest('approved must be true or false');
     const okd = await setPlayerApproved(approveMatch[1], approved, claims.name || claims.email || 'Admin');
-    if (!okd) return notFound('player');
+    if (!okd) return notFound('Player not found');
     if (approved) {
       const p = await getPlayer(approveMatch[1]);
       if (p?.cognitoSub) {
         await sendPush(toUser(p.cognitoSub), {
           title: 'You’re approved!',
-          body: 'An admin approved your Oakhurst Basketball account. The club chat is open to you now.',
+          body: 'An admin approved your account. You can now use the club chat.',
           url: '/chat',
           tag: 'approved',
         });
@@ -823,7 +832,7 @@ async function apiRouter(
   if (chargeMatch && m === 'POST') {
     const { amountCents, note } = parseBody(event);
     if (!Number.isInteger(amountCents) || amountCents <= 0) {
-      return badRequest('amountCents positive integer');
+      return badRequest('Enter an amount greater than $0');
     }
     const balance = await adjustBalance(chargeMatch[1], -amountCents);
     return ok({ playerId: chargeMatch[1], balanceCents: balance, note });
@@ -834,7 +843,7 @@ async function apiRouter(
   if (creditMatch && m === 'POST') {
     const { amountCents } = parseBody(event);
     if (!Number.isInteger(amountCents) || amountCents <= 0) {
-      return badRequest('amountCents positive integer');
+      return badRequest('Enter an amount greater than $0');
     }
     const balance = await adjustBalance(creditMatch[1], amountCents);
     return ok({ playerId: creditMatch[1], balanceCents: balance });
@@ -871,7 +880,7 @@ async function apiRouter(
   const settleMatch = path.match(/^\/api\/admin\/payments\/([a-f0-9]{24})\/(confirm|deny)$/);
   if (settleMatch && m === 'POST') {
     const r = await adminSettle(settleMatch[1], settleMatch[2] === 'confirm' ? 'confirmed' : 'denied');
-    if (r === 'notfound') return notFound('payment');
+    if (r === 'notfound') return notFound('Payment not found');
     if (r === 'notcash') return badRequest('card payments are settled by Stripe');
     return ok({ result: r === 'already' ? 'already_handled' : settleMatch[2] === 'confirm' ? 'confirmed' : 'denied' });
   }
@@ -910,11 +919,11 @@ async function apiRouter(
     const { input, error } = checkExpense(b, clubDate());
     if (error) return badRequest(error);
     const e = await updateExpense(String(b.cursor ?? ''), input!);
-    return e ? ok({ expense: e }) : notFound('expense');
+    return e ? ok({ expense: e }) : notFound('Expense not found');
   }
   if (path === '/api/admin/expenses/delete' && m === 'POST') {
     const { cursor } = parseBody(event);
-    return (await deleteExpense(String(cursor ?? ''))) ? ok({ deleted: true }) : notFound('expense');
+    return (await deleteExpense(String(cursor ?? ''))) ? ok({ deleted: true }) : notFound('Expense not found');
   }
 
   // ── Announcement (admin) ──
@@ -930,13 +939,13 @@ async function apiRouter(
       a = await postAnnouncement(text, { sub: claims.sub, name: claims.name || claims.email || 'Admin' });
     } else {
       if (!(await editAnnouncement(String(b.announceId ?? ''), text))) {
-        return json(409, { error: 'That announcement is no longer current' });
+        return json(409, { error: 'That announcement has expired or been replaced' });
       }
     }
     if (m === 'POST' || b.notify) {
       await sendPush((d) => d.sub !== claims.sub, {
-        title: m === 'POST' ? 'Oakhurst Basketball' : 'Updated: Oakhurst Basketball',
-        body: `${text} · Tap to RSVP`,
+        title: m === 'POST' ? 'Today at Oakhurst Basketball' : 'Updated: today at Oakhurst Basketball',
+        body: text,
         url: '/player',
         tag: 'announcement',
       }, { urgency: 'high', ttlSeconds: 12 * 3600 });
@@ -960,10 +969,10 @@ async function apiRouter(
     }).format(new Date(s.closesAt));
     // Everyone with notifications on, except whoever just opened it.
     await sendPush((d) => d.sub !== claims.sub, {
-      title: s.free ? 'Free day! The gym is open' : 'The gym is open',
+      title: s.free ? 'Free day: the gym is open' : 'The gym is open',
       body: s.free
-        ? `No charge to play today. Pickup is on until ${until}. Check in when you get there.`
-        : `Pickup is on until ${until}. Check in when you get there.`,
+        ? `Free today. Pickup is open until about ${until}. Check in when you arrive.`
+        : `Pickup is open until about ${until}. Check in when you arrive.`,
       url: '/player',
       tag: 'gym-open',
     }, { ttlSeconds: 2 * 3600 });
@@ -974,7 +983,7 @@ async function apiRouter(
   const sessMatch = path.match(/^\/api\/admin\/sessions\/([a-f0-9]{24})$/);
   if (sessMatch && m === 'GET') {
     const s = await getSession(sessMatch[1]);
-    if (!s) return notFound('session');
+    if (!s) return notFound('Session not found');
     const now = new Date().toISOString();
     return ok({
       session: { ...s, open: isOpen(s, now), endedAt: endedAt(s, now) },
@@ -989,7 +998,7 @@ async function apiRouter(
     const { free } = parseBody(event);
     if (typeof free !== 'boolean') return badRequest('free must be true or false');
     const r = await setFreeDay(freeMatch[1], free);
-    if (r.result === 'notfound') return notFound('session');
+    if (r.result === 'notfound') return notFound('Session not found');
     if (r.result === 'closed') return json(409, { error: 'That session is closed' });
     return ok({ session: r.session, refunded: r.refunded, refundedCents: r.refundedCents });
   }
@@ -998,7 +1007,7 @@ async function apiRouter(
   const closeMatch = path.match(/^\/api\/admin\/sessions\/([a-f0-9]{24})\/close$/);
   if (closeMatch && m === 'POST') {
     const r = await closeSession(closeMatch[1]);
-    if (r === 'notfound') return notFound('session');
+    if (r === 'notfound') return notFound('Session not found');
     return ok({ result: r });
   }
 
@@ -1010,8 +1019,8 @@ async function apiRouter(
   // POST /api/admin/admins  { name, email }
   if (path === '/api/admin/admins' && m === 'POST') {
     const { name, email } = parseBody(event);
-    if (!name || !email) return badRequest('name and email required');
-    if (!EMAIL_RE.test(String(email))) return badRequest('email looks invalid');
+    if (!name || !email) return badRequest('Enter a name and an email');
+    if (!EMAIL_RE.test(String(email))) return badRequest('That email address doesn’t look right');
     const a = await createAdmin({ name: String(name), email: String(email).trim().toLowerCase() });
     return created({ admin: { adminId: a.adminId, name: a.name, email: a.email } });
   }
@@ -1020,11 +1029,11 @@ async function apiRouter(
   const emailMatch = path.match(/^\/api\/admin\/admins\/([a-f0-9]{24})\/email$/);
   if (emailMatch && m === 'PUT') {
     const { email } = parseBody(event);
-    if (!EMAIL_RE.test(String(email ?? ''))) return badRequest('email looks invalid');
+    if (!EMAIL_RE.test(String(email ?? ''))) return badRequest('That email address doesn’t look right');
     try {
       await setAdminEmail(emailMatch[1], String(email).trim().toLowerCase());
     } catch (err: any) {
-      if (err?.name === 'ConditionalCheckFailedException') return notFound('admin');
+      if (err?.name === 'ConditionalCheckFailedException') return notFound('Admin not found');
       throw err;
     }
     return ok({ updated: true });
@@ -1041,7 +1050,7 @@ async function apiRouter(
   if (path === '/api/admin/kiosks' && m === 'POST') {
     const { deviceId, label } = parseBody(event);
     if (!deviceId || !/^[a-zA-Z0-9][a-zA-Z0-9_-]{1,63}$/.test(String(deviceId))) {
-      return badRequest('deviceId: letters, digits, _ or - (2-64 chars), e.g. court-kiosk-1');
+      return badRequest('Device ID must be 2–64 letters, digits, "_" or "-", for example court-kiosk-1');
     }
     const result = await createKiosk(String(deviceId), String(label ?? ''));
     return created(result); // { deviceId, label, token } — token shown once

@@ -14,7 +14,7 @@ function PlayerPage({ signOut }: { signOut: () => void }) {
     api.me().then((m) => setUser({ name: m.name ?? m.player?.name ?? m.email, email: m.email, isAdmin: m.isAdmin })).catch(() => {});
   }, []);
   return (
-    <AppShell section="Player" user={user ?? { name: '' }} onSignOut={signOut}>
+    <AppShell section="Account" user={user ?? { name: '' }} onSignOut={signOut}>
       <PlayerDashboard />
     </AppShell>
   );

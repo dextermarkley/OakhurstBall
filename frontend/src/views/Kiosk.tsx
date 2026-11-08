@@ -1,8 +1,8 @@
 // Entrance kiosk (landscape-first, works in portrait).
 //   Gym closed → "not open yet" (an admin opens the session from the Admin page).
-//   Gym open   → who's in + count, then tap name → PIN → check in ($5, once per session)
-//     ├─ covered (pass) or balance ok → "You're in", auto-reset
-//     ├─ negative but within −$10    → "You're in" + "you owe", pay now or later
+//   Gym open   → who’s in + count, then tap name → PIN → check in ($5, once per session)
+//     ├─ covered (pass) or balance ok → "You’re in", auto-reset
+//     ├─ negative but within −$10    → "You’re in" + "you owe", pay now or later
 //     └─ would go below −$10         → must pay first, then the kiosk checks them in
 //                                      automatically once paid
 // A red dot marks players with a negative balance (no amounts are shown).
@@ -66,6 +66,8 @@ type AdminLite = { adminId: string; name: string };
 const IDLE_MS = 60_000;
 const WAIT_MS = 10 * 60_000; // QR / cash confirmation wait
 const POLL_MS = 3_000;
+const DEFAULT_LIMIT_CENTS = 1000; // fallback if the server omits the owe-limit
+const DEFAULT_FEE_CENTS = 500; // fallback if the server omits the session fee
 const SESSION_POLL_MS = 15_000;
 
 export function Kiosk() {
@@ -76,6 +78,7 @@ export function Kiosk() {
   const [session, setSession] = useState<Session | null | undefined>(undefined);
   const [attendees, setAttendees] = useState<AttendeeLite[]>([]);
   const [players, setPlayers] = useState<PlayerLite[]>([]);
+  const [playersState, setPlayersState] = useState<'loading' | 'ready' | 'failed'>('loading');
   const [admins, setAdmins] = useState<AdminLite[]>([]);
   const [filter, setFilter] = useState('');
   const [selected, setSelected] = useState<PlayerLite | null>(null);
@@ -111,6 +114,15 @@ export function Kiosk() {
     setStep('provision');
   }, []);
 
+  /** Route any API failure: pairing problems send the kiosk back to setup; the rest show a readable message. */
+  const fail = useCallback(
+    (e: any) => {
+      if (PAIRING_ERRORS.has(e?.message)) unpair(e.message);
+      else setError(e?.message === 'wrong PIN' ? 'Wrong PIN. Try again.' : (e?.message ?? 'Something went wrong. Please try again.'));
+    },
+    [unpair],
+  );
+
   const loadSession = useCallback(async () => {
     try {
       const r = await kiosk.session();
@@ -125,7 +137,7 @@ export function Kiosk() {
   const onScan = useCallback((text: string) => {
     const p = parsePairing(text);
     if (!p) {
-      setError("That QR code isn't a kiosk pairing code.");
+      setError("That QR code isn’t a kiosk pairing code.");
       return false; // keep scanning
     }
     savePairing(p);
@@ -151,26 +163,35 @@ export function Kiosk() {
     setStep('pick');
   }, []);
 
+  const loadPlayers = useCallback(() => {
+    setPlayersState('loading');
+    kiosk
+      .players()
+      .then((r) => {
+        setPlayers(r.players);
+        setPlayersState('ready');
+      })
+      .catch((e) => {
+        setPlayersState('failed');
+        if (PAIRING_ERRORS.has(e.message)) unpair(e.message);
+      });
+  }, [unpair]);
+
   // On the home screen: load names/admins, keep the session + roster fresh.
   useEffect(() => {
     if (step !== 'pick') return;
     loadSession();
-    kiosk
-      .players()
-      .then((r) => setPlayers(r.players))
-      .catch((e) => {
-        if (!PAIRING_ERRORS.has(e.message)) setError(e.message);
-      });
+    loadPlayers();
     kiosk.admins().then((r) => setAdmins(r.admins)).catch(() => {});
     const t = setInterval(loadSession, SESSION_POLL_MS);
     return () => clearInterval(t);
-  }, [step, loadSession]);
+  }, [step, loadSession, loadPlayers]);
 
   // Idle reset.
   useEffect(() => {
     if (step === 'pick' || step === 'provision') return;
     // Reading and signing the waiver takes a while: give it 5 minutes of no touches.
-    const ms = step === 'card' || step === 'cashwait' ? WAIT_MS : step === 'done' ? 6_000 : step === 'agree' ? 5 * 60_000 : IDLE_MS;
+    const ms = step === 'card' || step === 'cashwait' ? WAIT_MS : step === 'done' ? ((checkin?.balanceCents ?? 0) < 0 ? 15_000 : 10_000) : step === 'agree' ? 5 * 60_000 : IDLE_MS;
     const t = setTimeout(reset, ms);
     return () => clearTimeout(t);
   }, [step, tick, reset]);
@@ -185,7 +206,7 @@ export function Kiosk() {
   function handleCheckin(r: CheckinResult) {
     setCheckin(r);
     if (r.result === 'no_session') {
-      setError('The gym is not open right now.');
+      setError("The gym isn’t open right now.");
       setStep('pick');
       return;
     }
@@ -195,25 +216,25 @@ export function Kiosk() {
       return;
     }
     if (r.result !== 'checked_in' && r.result !== 'already') {
-      // Never show "You're in" for a reply this version doesn't understand.
-      setError("Couldn't check you in. Please try again.");
+      // Never show "You’re in" for a reply this version doesn’t understand.
+      setError("Couldn’t check you in. Please try again.");
       setStep('pick');
       return;
     }
     setInGym(true);
-    const title = r.result === 'already' ? `You're already in, ${first(r.name)}` : `You're in, ${first(r.name)}!`;
+    const title = r.result === 'already' ? `You’re already in, ${first(r.name)}` : `You’re in, ${first(r.name)}!`;
     const bal = r.balanceCents ?? 0;
     setDone({
       title,
       detail: r.pass
         ? `Covered by your ${planName(r.pass.plan).toLowerCase()} through ${ymdText(r.pass.end)}.`
         : r.freeDay
-          ? `It’s a free day, so there’s no charge today. Balance ${balanceText(bal)}.`
+          ? `It’s a free day, so there’s no charge today. Balance: ${balanceText(bal)}.`
           : r.result === 'already'
           ? `Balance: ${balanceText(bal)}`
           : bal < 0
-            ? `Balance ${balanceText(bal)}. You can carry up to −${money(r.limitCents ?? 1000)}; after that you can't check in until you pay.`
-            : `${money(r.feeCents ?? 0)} from your credit · balance ${balanceText(bal)}`,
+            ? `Balance: ${balanceText(bal)}. You can owe up to ${money(r.limitCents ?? DEFAULT_LIMIT_CENTS)}; after that you can’t check in until you pay.`
+            : `${money(r.feeCents ?? DEFAULT_FEE_CENTS)} from your credit · Balance: ${balanceText(bal)}`,
       tone: 'success',
     });
     setStep('done');
@@ -234,7 +255,7 @@ export function Kiosk() {
       const r = await checkInDeferred();
       if (r) handleCheckin(r);
     } catch (e: any) {
-      setError(e.message);
+      fail(e);
     } finally {
       setBusy(false);
     }
@@ -260,7 +281,7 @@ export function Kiosk() {
       }
       handleCheckin(r);
     } catch (e: any) {
-      setError(e.message === 'wrong PIN' ? 'Wrong PIN. Try again.' : e.message);
+      fail(e);
     } finally {
       setBusy(false);
     }
@@ -274,14 +295,16 @@ export function Kiosk() {
         handleCheckin(await kiosk.checkin(selected.playerId, pin, 'defer'));
         return;
       } catch (e: any) {
-        setError(e.message);
+        fail(e);
       }
     }
     setDone(
       s.plan
         ? {
             title: `${planName(s.plan)} active`,
-            detail: `Thanks, ${first(selected?.name ?? '')}! You're covered for ${s.periodLabel}.`,
+            detail: s.periodLabel
+              ? `Thanks, ${first(selected?.name ?? '')}! You’re covered for ${s.periodLabel}.`
+              : `Thanks, ${first(selected?.name ?? '')}! Your pass is active.`,
             tone: 'success',
           }
         : {
@@ -335,7 +358,7 @@ export function Kiosk() {
       setCard({ paymentId: r.paymentId, url: r.checkoutUrl, qr });
       setStep('card');
     } catch (e: any) {
-      setError(e.message);
+      fail(e);
     } finally {
       setBusy(false);
     }
@@ -351,7 +374,7 @@ export function Kiosk() {
       setCash({ paymentId: r.paymentId, adminName: r.adminName, emailed: r.emailed });
       setStep('cashwait');
     } catch (e: any) {
-      setError(e.message);
+      fail(e);
     } finally {
       setBusy(false);
     }
@@ -361,14 +384,15 @@ export function Kiosk() {
   const backStep: Step = checkin?.result === 'limit' || checkin?.result === 'needs_payment' ? 'result' : 'pay';
   // Waiting screens: blocked players are checked in once the payment clears.
   const waitText = (what: 'paid' | 'confirmed') =>
-    inGym ? `You're checked in. Waiting for the payment` : `You'll be checked in as soon as it's ${what}`;
+    inGym
+      ? `You’re checked in. We’re just waiting for ${what === 'paid' ? 'your payment to clear.' : 'the admin to confirm.'}`
+      : `You’ll be checked in as soon as it’s ${what}.`;
   const chooseCash = (p: Purchase) => {
     setBuying(p);
     setError('');
     setStep('cash');
   };
 
-  // ── One-time pairing of this kiosk ──
   // ── Waiver + club rules, signed on the kiosk before the first check-in ──
   if (step === 'agree' && selected && agreeDocs) {
     return (
@@ -385,8 +409,11 @@ export function Kiosk() {
           try {
             handleCheckin(await kiosk.checkin(selected.playerId, pin));
           } catch (e: any) {
-            setError(e.message);
-            setStep('pick');
+            if (PAIRING_ERRORS.has(e.message)) unpair(e.message);
+            else {
+              setError(e.message);
+              setStep('pick');
+            }
           } finally {
             setBusy(false);
           }
@@ -396,6 +423,7 @@ export function Kiosk() {
     );
   }
 
+  // ── One-time pairing of this kiosk ──
   if (step === 'provision') {
     return (
       <Screen>
@@ -437,19 +465,23 @@ export function Kiosk() {
   const payChoices = opts && (
     <div className="space-y-3 text-left">
       {!opts.cardEnabled && (
-        <p className="text-center text-sm text-muted-foreground">Card payments aren't set up yet. Cash only for now.</p>
+        <p className="text-center text-sm text-muted-foreground">Card payments aren’t set up yet. Cash only for now.</p>
       )}
+      {admins.length === 0 && (
+        <p className="text-center text-sm text-muted-foreground">Cash isn’t available right now. No admin is set up to receive it.</p>
+      )}
+      {step !== 'pay' && (
       <ChoiceRow
         icon={<Banknote className="size-5" />}
         title="Pay as you go"
-        sub={`${money(checkin?.feeCents ?? 500)} per session, from your balance`}
+        sub={`${money(checkin?.feeCents ?? DEFAULT_FEE_CENTS)} per session, from your balance`}
       >
         <Button
           size="lg"
           disabled={busy || !opts.cardEnabled}
           onClick={() => startCard({ amountCents: opts.cardCents, what: `${money(opts.cardCents)} account credit` })}
         >
-          <CreditCard /> {money(opts.cardCents)}
+          <CreditCard /> Card ({money(opts.cardCents)})
         </Button>
         <Button
           size="lg"
@@ -460,6 +492,7 @@ export function Kiosk() {
           <Banknote /> Cash ({money(opts.cashCents)}+)
         </Button>
       </ChoiceRow>
+      )}
       {opts.plans
         .filter((o) => o.status !== 'not_offered')
         .map((o: PlanOffer) => {
@@ -468,7 +501,7 @@ export function Kiosk() {
             <ChoiceRow
               key={o.plan}
               icon={<Ticket className="size-5" />}
-              title={`${planName(o.plan)} · ${money(o.priceCents)}`}
+              title={o.status === 'owned' ? planName(o.plan) : `${planName(o.plan)} · ${money(o.priceCents)}`}
               sub={o.status === 'owned' ? `You have this (${o.label})` : `Access through ${ymdText(o.end)}`}
               owned={o.status === 'owned'}
             >
@@ -491,7 +524,7 @@ export function Kiosk() {
   return (
     <Screen onPointerDown={() => setTick((n) => n + 1)}>
       <div className="grid min-h-dvh lg:grid-cols-[minmax(320px,380px)_1fr]">
-        {/* Left: status + who's in (top band in portrait) */}
+        {/* Left: status + who’s in (top band in portrait) */}
         <aside className="safe-top flex flex-col bg-primary px-6 py-6 text-primary-foreground lg:min-h-dvh lg:px-8 lg:py-8">
           <div className="flex items-center gap-3">
             <LogoMark className="size-10" />
@@ -541,13 +574,13 @@ export function Kiosk() {
                   </ul>
                 )}
               </div>
-              <div className="mt-6 hidden items-center gap-2 text-xs text-primary-foreground/50 lg:flex">
+              <div className="mt-6 flex items-center gap-2 text-xs text-primary-foreground/50">
                 <NegDot /> Balance below $0
                 <span className="ml-auto">v{APP_VERSION}</span>
               </div>
             </>
           ) : (
-            <div className="mt-8 text-sm text-primary-foreground/60 lg:mt-12">Check-in opens when an admin starts a session.</div>
+            <div className="mt-8 text-sm text-primary-foreground/60 lg:mt-12">Check-in opens when an admin opens a session.</div>
           )}
         </aside>
 
@@ -566,8 +599,8 @@ export function Kiosk() {
               <div className="mx-auto mb-6 flex size-16 items-center justify-center rounded-full bg-muted">
                 <Lock className="size-7 text-muted-foreground" />
               </div>
-              <h1 className="text-3xl font-semibold tracking-tight">The gym isn't open yet</h1>
-              <p className="mt-3 text-lg text-muted-foreground">Check-in starts when an admin opens today's session.</p>
+              <h1 className="text-3xl font-semibold tracking-tight">The gym isn’t open right now</h1>
+              <p className="mt-3 text-lg text-muted-foreground">Check-in opens when an admin opens a session.</p>
             </Centered>
           )}
 
@@ -588,7 +621,7 @@ export function Kiosk() {
               </div>
               <div className="mt-6 grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-4">
                 {filtered.map((p) => {
-                  const inGym = checkedInIds.has(p.playerId);
+                  const isIn = checkedInIds.has(p.playerId);
                   return (
                     <button
                       key={p.playerId}
@@ -600,12 +633,12 @@ export function Kiosk() {
                       className={cn(
                         'flex min-h-20 items-center gap-3 rounded-2xl border bg-card p-3 text-left shadow-xs transition active:scale-[0.98]',
                         'outline-none hover:border-ring/60 focus-visible:ring-3 focus-visible:ring-ring/50',
-                        inGym && 'bg-success/5',
+                        isIn && 'bg-success/5',
                       )}
                     >
                       <Avatar className="size-11">
-                        <AvatarFallback className={cn('text-sm font-medium', inGym && 'bg-success/15 text-success')}>
-                          {inGym ? <CheckCircle2 className="size-5" /> : initials(p.name)}
+                        <AvatarFallback className={cn('text-sm font-medium', isIn && 'bg-success/15 text-success')}>
+                          {isIn ? <CheckCircle2 className="size-5" /> : initials(p.name)}
                         </AvatarFallback>
                       </Avatar>
                       <div className="min-w-0 flex-1">
@@ -613,12 +646,25 @@ export function Kiosk() {
                           <span className="truncate text-base font-medium">{p.name}</span>
                           {p.negative && <NegDot />}
                         </div>
-                        {inGym && <div className="text-xs font-medium text-success">Checked in</div>}
+                        {isIn && <div className="text-xs font-medium text-success">Checked in</div>}
                       </div>
                     </button>
                   );
                 })}
-                {filtered.length === 0 && <p className="col-span-full py-10 text-center text-muted-foreground">No players found.</p>}
+                {playersState === 'loading' && players.length === 0 && (
+                  <div className="col-span-full flex justify-center py-10"><Spinner className="size-6 text-muted-foreground" /></div>
+                )}
+                {playersState === 'failed' && players.length === 0 && (
+                  <div className="col-span-full py-10 text-center text-muted-foreground">
+                    Couldn’t load players.
+                    <div><Button variant="outline" className="mt-3" onClick={loadPlayers}>Retry</Button></div>
+                  </div>
+                )}
+                {playersState === 'ready' && filtered.length === 0 && (
+                  <p className="col-span-full py-10 text-center text-muted-foreground">
+                    {filter.trim() ? `No players match "${filter.trim()}".` : 'No players found.'}
+                  </p>
+                )}
               </div>
             </>
           )}
@@ -630,7 +676,7 @@ export function Kiosk() {
                 <AvatarFallback className="bg-primary text-lg text-primary-foreground">{initials(selected.name)}</AvatarFallback>
               </Avatar>
               <h1 className="mt-4 text-2xl font-semibold tracking-tight">{selected.name}</h1>
-              <p className="mt-1 mb-8 text-muted-foreground">Enter your PIN</p>
+              <p className="mt-1 mb-8 text-muted-foreground">Enter your PIN, then tap ✓</p>
               <PinPad onComplete={submitPin} disabled={busy} />
             </Centered>
           )}
@@ -642,9 +688,9 @@ export function Kiosk() {
                   <IconBubble tone="danger"><TriangleAlert className="size-7" /></IconBubble>
                   <h1 className="text-2xl font-semibold tracking-tight">{first(checkin.name)}, please pay to check in</h1>
                   <p className="mt-2 text-muted-foreground">
-                    Your balance is <span className="font-medium text-destructive">{balanceText(checkin.balanceCents ?? 0)}</span>.
-                    Balances can go down to −{money(checkin.limitCents ?? 0)}. Pay at least {money(checkin.needCents ?? 0)} and
-                    you'll be checked in automatically.
+                    Balance: <span className="font-medium text-destructive">{balanceText(checkin.balanceCents ?? 0)}</span>.
+                    You can owe up to {money(checkin.limitCents ?? DEFAULT_LIMIT_CENTS)}. Pay at least {money(checkin.needCents ?? 0)} and
+                    you’ll be checked in automatically.
                   </p>
                 </>
               ) : (
@@ -652,7 +698,7 @@ export function Kiosk() {
                   <IconBubble tone="brand"><Banknote className="size-7" /></IconBubble>
                   <h1 className="text-2xl font-semibold tracking-tight">How do you want to pay, {first(checkin.name)}?</h1>
                   <p className="mt-2 text-muted-foreground">
-                    Today is {money(checkin.feeCents ?? 0)}. Your balance is{' '}
+                    Today is {money(checkin.feeCents ?? DEFAULT_FEE_CENTS)}. Balance:{' '}
                     <span className={cn('font-medium', (checkin.balanceCents ?? 0) < 0 && 'text-destructive')}>
                       {balanceText(checkin.balanceCents ?? 0)}
                     </span>
@@ -667,9 +713,9 @@ export function Kiosk() {
                     {busy && <Spinner />} Pay next time
                   </Button>
                   <p className="mt-3 text-sm text-muted-foreground">
-                    Your balance will be{' '}
+                    Balance after today:{' '}
                     <span className="font-medium text-destructive">{balanceText(checkin.balanceAfterCents ?? 0)}</span>. You can
-                    carry a balance of up to −{money(checkin.limitCents ?? 0)}; after that you can't check in until you pay.
+                    owe up to {money(checkin.limitCents ?? DEFAULT_LIMIT_CENTS)}; after that you can’t check in until you pay.
                   </p>
                 </div>
               ) : null}
@@ -696,7 +742,7 @@ export function Kiosk() {
               <BackButton onClick={() => setStep(backStep)} />
               <h1 className="text-2xl font-semibold tracking-tight">Who are you giving {money(buying.amountCents)} to?</h1>
               <p className="mt-2 text-muted-foreground">
-                {buying.plan ? buying.what : 'Account credit. Paying more? Change the amount in $5 steps.'}
+                {buying.plan ? buying.what : 'Account credit. To pay more, change the amount in $5 steps.'}
               </p>
               {!buying.plan && (
                 <div className="mt-6 rounded-2xl border bg-card py-5">
@@ -728,7 +774,7 @@ export function Kiosk() {
 
           {step === 'cashwait' && cash && buying && (
             <Centered>
-              <IconBubble tone="brand"><Mail className="size-7" /></IconBubble>
+              <IconBubble tone="brand">{cash.emailed ? <Mail className="size-7" /> : <Banknote className="size-7" />}</IconBubble>
               <h1 className="text-2xl font-semibold tracking-tight">
                 Hand {money(buying.amountCents)} to {cash.adminName}
               </h1>
@@ -742,7 +788,7 @@ export function Kiosk() {
               </p>
               <div>
                 <Button variant="ghost" size="lg" className="mt-8" onClick={reset}>
-                  {inGym ? 'Done' : "Done. I'll check in later"}
+                  {inGym ? 'Done' : "Done, I’ll check in later"}
                 </Button>
               </div>
             </Centered>
@@ -784,7 +830,7 @@ export function Kiosk() {
                 </Button>
                 {checkin && !checkin.pass && !buying && checkin.options?.plans.some((o) => o.available) && (
                   <Button variant="ghost" onClick={() => setStep('pay')}>
-                    <Ticket /> Buy a quarter pass
+                    <Ticket /> Buy a pass
                   </Button>
                 )}
               </div>

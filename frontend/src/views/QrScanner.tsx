@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button';
 export function QrScanner({ onResult, onCancel }: { onResult: (text: string) => boolean; onCancel: () => void }) {
   const video = useRef<HTMLVideoElement>(null);
   const [error, setError] = useState('');
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
     let stream: MediaStream | null = null;
@@ -36,7 +37,7 @@ export function QrScanner({ onResult, onCancel }: { onResult: (text: string) => 
       raf = requestAnimationFrame(scan);
     }
 
-    if (!navigator.mediaDevices) setError('This browser has no camera access.');
+    if (!navigator.mediaDevices) setError('This browser can\u2019t use the camera. Enter the code by hand instead.');
     navigator.mediaDevices
       ?.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false })
       .then((s) => {
@@ -47,7 +48,7 @@ export function QrScanner({ onResult, onCancel }: { onResult: (text: string) => 
         stream = s;
         const v = video.current!;
         v.srcObject = s;
-        v.setAttribute('playsinline', 'true'); // iOS: don't go fullscreen
+        v.setAttribute('playsinline', 'true'); // iOS: don’t go fullscreen
         return v.play().then(() => {
           raf = requestAnimationFrame(scan);
         });
@@ -55,7 +56,7 @@ export function QrScanner({ onResult, onCancel }: { onResult: (text: string) => 
       .catch((e) =>
         setError(
           e?.name === 'NotAllowedError'
-            ? 'Camera access was blocked. Allow the camera for this site in Settings → Safari → Camera.'
+            ? 'Camera access was blocked. Allow camera access for this site in your browser settings, then try again.'
             : 'Could not start the camera on this device.',
         ),
       );
@@ -65,7 +66,7 @@ export function QrScanner({ onResult, onCancel }: { onResult: (text: string) => 
       cancelAnimationFrame(raf);
       stream?.getTracks().forEach((t) => t.stop());
     };
-  }, [onResult]);
+  }, [onResult, attempt]);
 
   return (
     <div className="text-center">
@@ -73,6 +74,16 @@ export function QrScanner({ onResult, onCancel }: { onResult: (text: string) => 
         <div className="py-8">
           <CameraOff className="mx-auto mb-3 size-8 text-muted-foreground" />
           <p className="text-sm text-muted-foreground">{error}</p>
+          <Button
+            variant="outline"
+            className="mt-3"
+            onClick={() => {
+              setError('');
+              setAttempt((n) => n + 1);
+            }}
+          >
+            Try again
+          </Button>
         </div>
       ) : (
         <>

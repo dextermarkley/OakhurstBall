@@ -16,9 +16,9 @@ export const ok = (body: unknown) => json(200, body);
 export const created = (body: unknown) => json(201, body);
 export const badRequest = (msg: string) => json(400, { error: msg });
 export const unauthorized = (msg = 'unauthorized') => json(401, { error: msg });
-export const forbidden = (msg = 'forbidden') => json(403, { error: msg });
-export const notFound = (msg = 'not found') => json(404, { error: msg });
-export const serverError = (msg = 'internal error') => json(500, { error: msg });
+export const forbidden = (msg = 'You don’t have access to this') => json(403, { error: msg });
+export const notFound = (msg = 'Not found') => json(404, { error: msg });
+export const serverError = (msg = 'Something went wrong. Please try again.') => json(500, { error: msg });
 
 export function parseBody<T = any>(event: APIGatewayProxyEventV2): T {
   if (!event.body) return {} as T;

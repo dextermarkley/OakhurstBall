@@ -28,6 +28,9 @@ interface Purchase {
   what: string; // human description, e.g. "Q1 2026–27 quarter pass"
 }
 
+/** "Q1 2026–27 (Apr 1 – Jun 30)" → "Q1 2026–27"; "2026–27 season" → "2026–27". */
+const shortPeriod = (label: string) => label.replace(/ \(.*\)$/, '').replace(/ season$/, '');
+
 function purchaseFor(plan: Plan | undefined, creditCents: number): Purchase {
   if (!plan) return { amountCents: creditCents, what: 'account credit' };
   const p = periodFor(plan, clubDate());
@@ -38,7 +41,8 @@ function purchaseFor(plan: Plan | undefined, creditCents: number): Purchase {
     periodLabel: p.label,
     periodStart: p.start,
     periodEnd: p.end,
-    what: plan === 'year' ? `${p.label} year pass` : `${p.label} quarter pass`,
+    // Short name for pushes/emails; the long label stays in periodLabel.
+    what: plan === 'year' ? `${shortPeriod(p.label)} year pass` : `${shortPeriod(p.label)} quarter pass`,
   };
 }
 const TOKEN_TTL_SECONDS = 24 * 60 * 60;
@@ -129,10 +133,10 @@ async function notifySettled(playerId: string, payment: Payment, outcome: 'confi
   let body: string;
   if (outcome === 'denied') {
     title = 'Cash payment not confirmed';
-    body = `Your ${amount} cash payment wasn't confirmed. Check with an organizer.`;
+    body = `Your ${amount} cash payment wasn't confirmed. Please check with an admin.`;
   } else if (madePass) {
     title = `Your ${payment.plan === 'year' ? 'year' : 'quarter'} pass is active`;
-    body = `${payment.periodLabel ?? 'Pass'}: every session is covered. Paid ${amount} by ${how}.`;
+    body = `${payment.periodLabel ? `Covered for ${shortPeriod(payment.periodLabel)}. ` : ''}Paid ${amount} by ${how}.`;
   } else {
     const p = await getPlayer(playerId).catch(() => null);
     const bal = p?.balanceCents;
@@ -282,8 +286,8 @@ export async function createCashPayment(input: {
   await sendPush(
     toAdmin({ cognitoSub: adm?.cognitoSub, email: input.adminEmail ?? adm?.email }),
     {
-      title: `Confirm ${amount} cash`,
-      body: `${input.playerName} says they gave you ${amount}${input.plan ? ` for a ${purchase.what}` : ''}. Tap to confirm or deny.`,
+      title: `Cash from ${input.playerName}: ${amount}`,
+      body: `Confirm you got ${amount}${input.plan ? ` for a ${purchase.what}` : ''}. Tap to confirm or deny.`,
       url: `/confirm/${token}`,
       tag: `cash-${payment.paymentId}`,
     },
@@ -298,16 +302,17 @@ export async function createCashPayment(input: {
       to: input.adminEmail,
       subject: `Confirm ${amount} cash from ${input.playerName}${forWhat}`,
       text:
-        `${input.playerName} says they gave you ${amount} cash${forWhat} at Oakhurst Basketball.\n\n` +
-        `Confirm or deny it here: ${link}\n\n` +
-        `The link expires in 24 hours. You can also confirm it on the Admin page.`,
+        `${input.playerName} says they paid you ${amount} in cash${forWhat}. Please confirm or deny it:\n\n` +
+        `${link}\n\n` +
+        `You received this because the player chose you. If it didn't happen, you can ignore this email; the link expires in 24 hours. You can also confirm it on the Admin page.`,
       html:
-        `<p><strong>${name}</strong> says they gave you <strong>${amount} cash</strong>` +
-        `${escapeHtml(forWhat)} at Oakhurst Basketball.</p>` +
+        `<p><strong>${name}</strong> says they paid you <strong>${amount} in cash</strong>` +
+        `${escapeHtml(forWhat)}. Please confirm or deny it.</p>` +
         `<p><a href="${link}" style="display:inline-block;padding:12px 20px;background:#e8730c;` +
         `color:#fff;border-radius:8px;text-decoration:none;font-weight:600">` +
         `Confirm or deny</a></p>` +
-        `<p style="color:#6b7684;font-size:13px">The link expires in 24 hours. ` +
+        `<p style="color:#6b7684;font-size:13px">You received this because the player chose you. ` +
+        `If it didn't happen, you can ignore this email; the link expires in 24 hours. ` +
         `You can also confirm it on the Admin page.</p>`,
     });
     return { payment, emailed: true };
@@ -371,11 +376,11 @@ export async function createCardPayment(input: { playerId: string; playerName: s
     playerName: input.playerName,
     amountCents: purchase.amountCents,
     productName: input.plan
-      ? `Oakhurst Basketball ${input.plan === 'year' ? 'year' : 'quarter'} pass`
-      : 'Oakhurst Basketball credit',
+      ? `Oakhurst Basketball ${input.plan === 'year' ? 'year' : 'quarter'} pass (${shortPeriod(purchase.periodLabel ?? '')})`
+      : `Oakhurst Basketball account credit (${dollars(purchase.amountCents)})`,
     productDescription: input.plan
-      ? `${purchase.periodLabel} for ${input.playerName}`
-      : `Account credit for ${input.playerName}`,
+      ? `Covers every pickup session, ${purchase.periodLabel}. For ${input.playerName}.`
+      : `Pays for ${dollars(AMOUNTS.dailyFee)} pickup sessions. For ${input.playerName}.`,
     baseUrl: baseUrl(),
     email: input.email,
   });

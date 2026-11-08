@@ -102,7 +102,7 @@ function AdminInner({ signOut }: { signOut: () => void }) {
             </EmptyMedia>
             <EmptyTitle>{error ? 'Something went wrong' : 'Admins only'}</EmptyTitle>
             <EmptyDescription>
-              {error || "Your account isn't in the admin group. Ask an organizer to add you."}
+              {error || "Your account isn’t in the admin group. Ask an organizer to add you."}
             </EmptyDescription>
           </EmptyHeader>
           <EmptyContent>
@@ -221,7 +221,7 @@ function OverviewTab({ onGo }: { onGo: (t: TabId) => void }) {
           icon={open ? DoorOpen : DoorClosed}
           tone={open ? 'success' : 'default'}
           value={open ? 'Open' : 'Closed'}
-          hint={open ? `${open.attendeeCount} in · until ${timeOf(open.closesAt)}` : 'Open a session from Sessions'}
+          hint={open ? `${open.attendeeCount} in · until ${timeOf(open.closesAt)}` : 'Open a session on the Sessions tab'}
         />
         <StatCard label="Players" icon={Users} value={players.length} hint={`${players.filter((p) => p.pass).length} with a pass`} />
         <StatCard
@@ -509,7 +509,7 @@ function SessionsTab() {
                   <TableRow key={s.sessionId} className="cursor-pointer" onClick={() => view(s)}>
                     <TableCell className="font-medium">{longDateOf(s.openedAt)}</TableCell>
                     <TableCell className="text-muted-foreground">
-                      {timeOf(s.openedAt)} – {s.open ? 'now' : s.endedAt ? timeOf(s.endedAt) : ''}
+                      {timeOf(s.openedAt)} – {s.open ? 'now' : s.endedAt ? timeOf(s.endedAt) : '—'}
                       {s.open && <Badge className="ml-2 bg-success/12 text-success">Open</Badge>}
                       {s.free && <Badge className="ml-2 bg-brand/12 text-brand">Free day</Badge>}
                       {s.autoClosed && <span className="ml-2 text-xs">auto-closed</span>}
@@ -532,7 +532,7 @@ function SessionsTab() {
                 <SheetTitle>{longDateOf(viewing.session.openedAt)}</SheetTitle>
                 <SheetDescription>
                   {timeOf(viewing.session.openedAt)} –{' '}
-                  {viewing.session.open ? 'now' : viewing.session.endedAt ? timeOf(viewing.session.endedAt) : ''} · opened by{' '}
+                  {viewing.session.open ? 'now' : viewing.session.endedAt ? timeOf(viewing.session.endedAt) : '—'} · opened by{' '}
                   {viewing.session.openedByName}
                 </SheetDescription>
               </SheetHeader>
@@ -563,7 +563,7 @@ function AttendeeTable({ attendees }: { attendees: Attendee[] }) {
         <TableRow>
           <TableHead>Player</TableHead>
           <TableHead>In at</TableHead>
-          <TableHead className="text-right">Paid</TableHead>
+          <TableHead className="text-right">Fee</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
@@ -637,12 +637,12 @@ function PlayersTab() {
 
   const shown = (players ?? []).filter((p) => p.name.toLowerCase().includes(q.trim().toLowerCase()));
   // Self sign-ups waiting for an admin (players added by an admin are approved already).
-  const pending = (players ?? []).filter((p) => p.hasAccount && !p.approved);
+  const pending = (players ?? []).filter((p) => p.hasAccount && !p.approved && !p.isAdmin);
 
   async function approve(p: any, approved: boolean) {
     if (!approved) {
       const ok = await confirm({
-        title: `Remove ${p.name}'s chat access?`,
+        title: `Remove ${p.name}’s chat access?`,
         description: 'They keep their account, balance and check-ins, but can’t open the chat until approved again.',
         confirmLabel: 'Remove access',
         destructive: true,
@@ -662,13 +662,14 @@ function PlayersTab() {
     const o = plans.find((x) => x.plan === plan)!;
     const ok = await confirm({
       title: `Record a ${planName(plan).toLowerCase()} for ${p.name}?`,
-      description: `${money(o.priceCents)} · ${o.label}. Use this when they paid outside the app; their balance won't change.`,
+      description: `${money(o.priceCents)} · ${o.label}. Use this when they paid outside the app; their balance won’t change.` +
+        (o.status === 'not_offered' ? ' This is outside the normal Apr 1 – Jun 30 sales window.' : ''),
       confirmLabel: 'Record pass',
     });
     if (!ok) return;
     try {
       const r = await api.grantPass(p.playerId, plan);
-      toast.success(`${planName(plan)} recorded for ${p.name}` + (r.refundedCents ? ` · today's ${money(r.refundedCents)} refunded` : ''));
+      toast.success(`${planName(plan)} recorded for ${p.name}` + (r.refundedCents ? ` · today’s ${money(r.refundedCents)} refunded` : ''));
       load();
     } catch (e: any) {
       toast.error(e.message);
@@ -679,7 +680,7 @@ function PlayersTab() {
     <div className="space-y-6">
       <PageHeader
         title="Players"
-        description={players ? `${players.length} players` : 'Loading…'}
+        description={players ? `${players.length} player${players.length === 1 ? '' : 's'}` : 'Loading…'}
         actions={
           <Button onClick={() => setAdding(true)}>
             <UserPlus /> Add player
@@ -755,12 +756,12 @@ function PlayersTab() {
                           <Badge
                             variant="outline"
                             className="border-brand/40 text-brand"
-                            title={p.agreedAt ? 'Signed an older version; asked again at next sign-in' : 'Asked to sign at next sign-in'}
+                            title={p.agreedAt ? 'Signed an older version. Asked to sign again at next check-in.' : 'Hasn’t signed yet. Asked to sign at next check-in.'}
                           >
                             {p.agreedAt ? 'Waiver outdated' : 'No waiver'}
                           </Badge>
                         )}
-                        {p.hasAccount && !p.approved && (
+                        {p.hasAccount && !p.approved && !p.isAdmin && (
                           <Badge variant="outline" className="text-muted-foreground" title="Can’t use the chat until approved">
                             Not approved
                           </Badge>
@@ -810,7 +811,7 @@ function PlayersTab() {
                               return (
                                 <DropdownMenuItem key={o.plan} disabled={owned} onClick={() => recordPass(p, o.plan)}>
                                   <Ticket /> {planName(o.plan)} · {money(o.priceCents)}
-                                  {o.status === 'not_offered' && <span className="ml-auto text-xs text-muted-foreground">paid by Jun 30</span>}
+                                  {o.status === 'not_offered' && <span className="ml-auto text-xs text-muted-foreground">usually sold Apr 1 – Jun 30</span>}
                                 </DropdownMenuItem>
                               );
                             })}
@@ -865,7 +866,7 @@ function AddPlayerDialog({ open, onOpenChange, onDone }: { open: boolean; onOpen
               label="Kiosk PIN (optional)"
               inputMode="numeric"
               maxLength={6}
-              description="4 to 6 digits. They can change it from their player page."
+              description="4 to 6 digits. Tell the player; they can’t see it again. They can set their own if they sign up later. Without a PIN they can’t check in at the kiosk."
             />
           </FieldGroup>
           <DialogFooter>
@@ -884,6 +885,8 @@ function AddPlayerDialog({ open, onOpenChange, onDone }: { open: boolean; onOpen
 
 function ChargeDialog({ player, onClose, onDone }: { player: any; onClose: () => void; onDone: () => void }) {
   const form = useForm<z.infer<typeof chargeSchema>>({ resolver: zodResolver(chargeSchema), defaultValues: { amount: '' } });
+  const chargeCents = Math.round(Number(form.watch('amount')) * 100);
+  const overLimit = !!player && chargeCents > 0 && player.balanceCents - chargeCents < -1000;
   useEffect(() => {
     if (player) form.reset({ amount: '' });
   }, [player, form]);
@@ -903,7 +906,7 @@ function ChargeDialog({ player, onClose, onDone }: { player: any; onClose: () =>
         <form onSubmit={submit} noValidate>
           <DialogHeader>
             <DialogTitle>Charge {player?.name}</DialogTitle>
-            <DialogDescription>Takes the amount from their balance. Current balance: {player && balanceText(player.balanceCents)}.</DialogDescription>
+            <DialogDescription>Takes the amount from their balance. Balance: {player && balanceText(player.balanceCents)}.{overLimit && ' This will take their balance below the −$10 limit.'}</DialogDescription>
           </DialogHeader>
           <FieldGroup className="py-5">
             <FormInput control={form.control} name="amount" label="Amount (USD)" inputMode="decimal" placeholder="5.00" autoComplete="off" />
@@ -942,7 +945,7 @@ function PaymentsTab() {
 
   async function settle(p: any, action: 'confirm' | 'deny') {
     const ok = await confirm({
-      title: action === 'confirm' ? `Confirm ${money(p.amountCents)} from ${p.playerName}?` : `Deny ${p.playerName}'s payment?`,
+      title: action === 'confirm' ? `Confirm ${money(p.amountCents)} from ${p.playerName}?` : `Deny ${p.playerName}’s payment?`,
       description:
         action === 'confirm'
           ? p.plan
@@ -1094,7 +1097,7 @@ function AdminsTab() {
     <div className="space-y-6">
       <PageHeader
         title="Admins"
-        description="People players can hand cash to at the kiosk. They get an email to confirm each payment."
+        description="People players can hand cash to at the kiosk. They get an email to confirm each payment. This list doesn’t give anyone access to the dashboard."
         actions={
           <Button onClick={() => setAdding(true)}>
             <Plus /> Add admin
@@ -1159,7 +1162,7 @@ function AdminsTab() {
           <form onSubmit={add} noValidate>
             <DialogHeader>
               <DialogTitle>Add admin</DialogTitle>
-              <DialogDescription>They'll appear in the kiosk's "who are you paying?" list.</DialogDescription>
+              <DialogDescription>They’ll appear in the kiosk’s list of people to hand cash to.</DialogDescription>
             </DialogHeader>
             <FieldGroup className="py-5">
               <FormInput control={addForm.control} name="name" label="Name" autoComplete="off" />
@@ -1181,7 +1184,7 @@ function AdminsTab() {
         <DialogContent className="sm:max-w-md">
           <form onSubmit={save} noValidate>
             <DialogHeader>
-              <DialogTitle>Edit {editing?.name}'s email</DialogTitle>
+              <DialogTitle>Edit {editing?.name}’s email</DialogTitle>
               <DialogDescription>Cash confirmation links go to this address.</DialogDescription>
             </DialogHeader>
             <FieldGroup className="py-5">
@@ -1269,7 +1272,7 @@ function KiosksTab() {
     <div className="space-y-6">
       <PageHeader
         title="Kiosks"
-        description="Pair the entrance kiosk by scanning a QR code."
+        description="Pair a kiosk by scanning a QR code."
         actions={
           <Button onClick={() => setPairing(true)}>
             <QrCode /> Pair a kiosk
@@ -1287,7 +1290,7 @@ function KiosksTab() {
                   <Tablet />
                 </EmptyMedia>
                 <EmptyTitle>No kiosks paired</EmptyTitle>
-                <EmptyDescription>Pair the entrance kiosk to start checking players in.</EmptyDescription>
+                <EmptyDescription>Pair a kiosk to start checking players in.</EmptyDescription>
               </EmptyHeader>
             </Empty>
           ) : (
@@ -1307,7 +1310,7 @@ function KiosksTab() {
                   <TableRow key={k.deviceId}>
                     <TableCell className="font-medium">
                       <span className="inline-flex items-center gap-2">
-                        <Tablet className="size-4 text-muted-foreground" /> {k.label}
+                        <Tablet className="size-4 text-muted-foreground" /> {k.label || k.deviceId}
                       </span>
                     </TableCell>
                     <TableCell className="font-mono text-xs text-muted-foreground">{k.deviceId}</TableCell>
@@ -1342,7 +1345,7 @@ function KiosksTab() {
               <DialogHeader>
                 <DialogTitle>Scan with the kiosk</DialogTitle>
                 <DialogDescription>
-                  In the kiosk app tap <span className="font-medium text-foreground">Scan pairing QR</span>, or point the kiosk's
+                  On the kiosk screen tap <span className="font-medium text-foreground">Scan pairing QR</span>, or point the kiosk’s
                   Camera app at the code.
                 </DialogDescription>
               </DialogHeader>

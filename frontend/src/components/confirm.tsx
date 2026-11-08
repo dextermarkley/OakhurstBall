@@ -26,6 +26,7 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
   const resolver = useRef<(v: boolean) => void>(() => {});
 
   const confirm = useCallback((o: ConfirmOptions) => {
+    resolver.current(false); // settle any dialog that is still pending
     setOpts(o);
     return new Promise<boolean>((resolve) => {
       resolver.current = resolve;

@@ -110,11 +110,11 @@ export async function changesSince(after: string, sinceIso: string) {
 }
 
 export function checkUpload(contentType: unknown, size: unknown): string | null {
-  if (!BUCKET) return 'Image uploads are not set up';
-  if (!IMAGE_TYPES[String(contentType)]) return 'Only JPEG, PNG, GIF and WebP images';
+  if (!BUCKET) return 'Photo uploads aren’t available right now';
+  if (!IMAGE_TYPES[String(contentType)]) return 'Photos must be JPEG, PNG, GIF or WebP';
   const n = Number(size);
-  if (!Number.isFinite(n) || n <= 0) return 'size required';
-  if (n > MAX_IMAGE_BYTES) return 'Images must be 10 MB or smaller';
+  if (!Number.isFinite(n) || n <= 0) return 'That image can’t be used. Try a different one.';
+  if (n > MAX_IMAGE_BYTES) return 'Photos must be 10 MB or smaller';
   return null;
 }
 
@@ -148,16 +148,16 @@ export async function postMessage(input: {
   if (input.imageKey) {
     const k = String(input.imageKey);
     const m = k.startsWith('chat/') ? MEDIA_RE.exec(k.slice(5)) : null;
-    if (!m || m[1] !== ownerDir(input.sub)) return { error: 'bad image' };
+    if (!m || m[1] !== ownerDir(input.sub)) return { error: 'That image can’t be used. Try a different one.' };
     try {
       const h = await s3.send(new HeadObjectCommand({ Bucket: BUCKET, Key: k }));
-      if (!h.ContentType?.startsWith('image/') || (h.ContentLength ?? 0) > MAX_IMAGE_BYTES) return { error: 'bad image' };
+      if (!h.ContentType?.startsWith('image/') || (h.ContentLength ?? 0) > MAX_IMAGE_BYTES) return { error: 'That image can’t be used. Try a different one.' };
     } catch {
       return { error: 'Image upload did not finish' };
     }
     imageKey = k;
   }
-  if (!text && !imageKey) return { error: 'Say something' };
+  if (!text && !imageKey) return { error: 'Type a message or add a photo' };
   const dim = (v: unknown) => {
     const n = Math.round(Number(v));
     return Number.isFinite(n) && n > 0 && n < 20000 ? n : undefined;

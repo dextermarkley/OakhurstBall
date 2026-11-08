@@ -29,7 +29,7 @@ async function param(name: string): Promise<string | null> {
 
 export class StripeNotConfigured extends Error {
   constructor() {
-    super('Card payments are not set up yet');
+    super('Card payments aren’t available yet. You can pay in cash.');
   }
 }
 

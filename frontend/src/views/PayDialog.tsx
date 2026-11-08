@@ -5,14 +5,14 @@
 // admin confirms by email (or on the Admin page), same as the kiosk.
 import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
-import { ArrowLeft, Banknote, CreditCard, Mail, Ticket } from 'lucide-react';
+import { ArrowLeft, Banknote, CircleDollarSign, CreditCard, Ticket } from 'lucide-react';
 import { api, type CheckinResult, type MySession, type Plan } from '@/api';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Spinner } from '@/components/ui/spinner';
 import { CashAmountPicker } from '@/components/cash-amount';
-import { balanceText, initials, money, planName } from '@/lib/format';
+import { balanceText, initials, money, planName, signedMoney } from '@/lib/format';
 
 type Purchase = { plan?: Plan; cents: number; label: string };
 type Admin = { adminId: string; name: string };
@@ -33,6 +33,7 @@ export function PayDialog({
   onChanged: () => void;
 }) {
   const [busy, setBusy] = useState(false);
+  const [busyAdmin, setBusyAdmin] = useState('');
   const [cashFor, setCashFor] = useState<Purchase | null>(null);
   // Cash credit can be more than $5 (in $5 steps); passes have a fixed price.
   const [cashCents, setCashCents] = useState(500);
@@ -104,6 +105,7 @@ export function PayDialog({
   async function payCash(admin: Admin) {
     if (!cashFor) return;
     setBusy(true);
+    setBusyAdmin(admin.adminId);
     try {
       await checkInFirst();
       const r = await api.myPayCash(admin.adminId, cashFor.plan, cashFor.plan ? undefined : cashCents);
@@ -116,6 +118,7 @@ export function PayDialog({
       toast.error(e.message);
     } finally {
       setBusy(false);
+      setBusyAdmin('');
     }
   }
 
@@ -123,8 +126,12 @@ export function PayDialog({
     setBusy(true);
     try {
       const r = await api.myCheckin('defer');
-      if (r.result === 'checked_in' || r.result === 'already') toast.success(`Checked in. Balance ${balanceText(r.balanceCents ?? 0)}.`);
-      else toast.error("Couldn't check you in. Refresh the page and try again.");
+      if (r.result === 'checked_in' || r.result === 'already') toast.success(
+          (r.balanceCents ?? ask?.balanceAfterCents) === undefined
+            ? 'Checked in.'
+            : `Checked in. Balance ${balanceText(r.balanceCents ?? ask?.balanceAfterCents ?? 0)}.`,
+        );
+      else toast.error('Couldn’t check you in. Refresh the page and try again.');
       onChanged();
       onClose();
     } catch (e: any) {
@@ -136,7 +143,7 @@ export function PayDialog({
 
   const title = blocked ? 'Please pay to check in' : ask ? 'How do you want to pay?' : 'Pay now';
   const description = blocked
-    ? `Your balance is ${balanceText(ask?.balanceCents ?? 0)}. Balances can go down to −${money(ask?.limitCents ?? 0)}, so pay at least ${money(ask?.needCents ?? 0)}.`
+    ? `Your balance is ${balanceText(ask?.balanceCents ?? 0)}. Balances can go down to ${signedMoney(-(ask?.limitCents ?? 0))}, so pay at least ${money(ask?.needCents ?? 0)}.`
     : ask
       ? `Today is ${money(ask.feeCents ?? 0)}. Your balance is ${balanceText(ask.balanceCents ?? 0)}.`
       : `Your balance is ${balanceText(s.balanceCents)}.`;
@@ -148,18 +155,18 @@ export function PayDialog({
           <>
             <DialogHeader>
               <div className="mb-2 flex size-11 items-center justify-center rounded-full bg-brand/12 text-brand">
-                <Mail className="size-5" />
+                <Banknote className="size-5" />
               </div>
               <DialogTitle>
                 Hand {money(sent.cents)} to {sent.adminName}
               </DialogTitle>
               <DialogDescription>
-                {sent.label}.{' '}
+                For {sent.label}.{' '}
                 {sent.emailed ? `${sent.adminName} got an email to confirm it.` : `${sent.adminName} can confirm it on the Admin page.`}{' '}
                 {blocked
                   ? 'Once they confirm, tap Check in again.'
                   : canDefer
-                    ? "You're checked in. Your balance updates when they confirm."
+                    ? 'You’re checked in. Your balance updates when they confirm.'
                     : 'Your balance updates when they confirm.'}
               </DialogDescription>
             </DialogHeader>
@@ -189,7 +196,7 @@ export function PayDialog({
                     <AvatarFallback className="text-[11px]">{initials(a.name)}</AvatarFallback>
                   </Avatar>
                   {a.name}
-                  {busy && <Spinner className="ml-auto" />}
+                  {busyAdmin === a.adminId && <Spinner className="ml-auto" />}
                 </Button>
               ))}
             </div>
@@ -207,15 +214,15 @@ export function PayDialog({
             </DialogHeader>
             <div className="space-y-3 py-2">
               <Option
-                icon={<Banknote className="size-4.5" />}
+                icon={<CircleDollarSign className="size-4.5" />}
                 title="Add credit"
                 sub={`Pay as you go: ${money(s.feeCents || 500)} per session`}
               >
                 <Button size="sm" disabled={busy || !s.options.cardEnabled} onClick={() => payCard(creditCard)}>
-                  <CreditCard /> {money(creditCard.cents)}
+                  <CreditCard /> Card · {money(creditCard.cents)}
                 </Button>
                 <Button size="sm" variant="outline" disabled={busy} onClick={() => chooseCash(creditCash)}>
-                  <Banknote /> Cash ({money(creditCash.cents)}+)
+                  <Banknote /> Cash
                 </Button>
               </Option>
               {passes.map((p) => (
@@ -229,7 +236,7 @@ export function PayDialog({
                 </Option>
               ))}
               <p className="text-xs text-muted-foreground">
-                {s.options.cardEnabled ? 'Card, Apple Pay or Google Pay through Stripe.' : "Card payments aren't set up yet."} Cash goes to
+                {s.options.cardEnabled ? 'Card, Apple Pay or Google Pay through Stripe.' : 'Card payments aren’t set up yet.'} Cash goes to
                 an admin, who confirms it.
               </p>
             </div>
@@ -240,7 +247,7 @@ export function PayDialog({
                 </Button>
                 <p className="mt-2 text-xs text-muted-foreground">
                   Your balance will be <span className="font-medium text-destructive">{balanceText(ask?.balanceAfterCents ?? 0)}</span>.
-                  You can carry a balance of up to −{money(ask?.limitCents ?? 0)}; after that you can't check in until you pay.
+                  You can carry a balance of up to {signedMoney(-(ask?.limitCents ?? 0))}; after that you can’t check in until you pay.
                 </p>
               </div>
             )}

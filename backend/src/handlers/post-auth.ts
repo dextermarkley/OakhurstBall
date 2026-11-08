@@ -35,7 +35,7 @@ export const handler = async (
           await Promise.race([
             sendPush((d) => !!d.isAdmin && d.sub !== sub, {
               title: 'New sign-up',
-              body: `${name}${email && email !== name ? ` (${email})` : ''} joined. Approve them for the chat in Admin → Players.`,
+              body: `${name} signed up. Tap to approve them for the chat.`,
               url: '/admin?tab=players',
               tag: `signup-${sub}`,
             }),

@@ -18,7 +18,7 @@ single fixed cost is the Route 53 hosted zone ($0.50/month).
                    ├─ /api/*          → api Lambda      (Cognito JWT)
                    └─ $default        → web Lambda      (serves the React SPA)
                         │
-            DynamoDB (single table) · Cognito · SNS (SMS confirm links)
+            DynamoDB (single table) · Cognito · SES (cash confirm email) · S3 (chat images)
 ```
 
 ## Components

@@ -1,5 +1,5 @@
 // The signed-in player's own page: gym session + check-in, plan, balance,
-// attendance chart, kiosk PIN, and history. Also shown in Admin → "My player page".
+// attendance chart, kiosk PIN, and history. Also shown in Admin → "My account".
 import { useEffect, useMemo, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -61,22 +61,32 @@ export function PlayerDashboard() {
     return (
       <Empty>
         <EmptyHeader>
-          <EmptyTitle>We couldn't load your account</EmptyTitle>
+          <EmptyTitle>We couldn’t load your account</EmptyTitle>
           <EmptyDescription>{error}</EmptyDescription>
+          <Button
+            className="mt-2"
+            onClick={() => {
+              setError('');
+              load();
+            }}
+          >
+            Try again
+          </Button>
         </EmptyHeader>
       </Empty>
     );
   }
   if (!data || !session) return <DashboardSkeleton />;
 
-  const firstName = String(data.name).split(' ')[0];
+  const firstName = String(data.name ?? '').split(' ')[0] || 'there';
+  const fee = session.feeCents || 500;
 
   return (
     <div className="space-y-6">
       <div className="flex items-end justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Hi, {firstName}</h1>
-          <p className="mt-1 text-sm text-muted-foreground">Here's your Oakhurst Basketball account.</p>
+          <p className="mt-1 text-sm text-muted-foreground">Here’s your Oakhurst Basketball account.</p>
         </div>
         <Button onClick={() => setPaying(true)}>
           <CreditCard /> Pay now
@@ -94,20 +104,20 @@ export function PlayerDashboard() {
           icon={CircleDollarSign}
           tone={data.balanceCents < 0 ? 'danger' : 'success'}
           value={<span className={cn(data.balanceCents < 0 && 'text-destructive')}>{balanceText(data.balanceCents)}</span>}
-          hint={data.balanceCents < 0 ? 'Owed to the club' : 'Covers pay-as-you-go sessions'}
+          hint={data.balanceCents < 0 ? 'Owed to the club' : data.balanceCents === 0 ? 'Add credit to pay as you go' : 'Covers pay-as-you-go sessions'}
         />
         <StatCard
           label="Plan"
           icon={Ticket}
           tone="brand"
           value={session.pass ? planName(session.pass.plan) : 'Pay as you go'}
-          hint={session.pass ? `Through ${ymdText(session.pass.end)}` : `${money(session.feeCents)} per session`}
+          hint={session.pass ? `Through ${ymdText(session.pass.end)}` : `${money(fee)} per session`}
         />
         <StatCard
-          label="Sessions attended"
+          label="Check-ins"
           icon={CalendarCheck}
           value={data.checkins.length}
-          hint={data.checkins[0] ? `Last: ${dateOf(data.checkins[0].at)}` : 'No check-ins yet'}
+          hint={data.checkins[0] ? `All time · last ${dateOf(data.checkins[0].at)}` : 'No check-ins yet'}
         />
       </div>
 
@@ -130,25 +140,27 @@ function SessionCard({ s, onChange }: { s: MySession; onChange: () => void }) {
   function report(r: CheckinResult) {
     if (r.result === 'needs_agreement') {
       // The waiver or rules changed while this page was open: reload to sign them.
-      toast.info('Please sign the updated waiver and club rules first.');
+      toast.info('Please sign the updated waiver and Club Rules first.');
       setTimeout(() => window.location.reload(), 1200);
       return;
     }
     if (r.result === 'no_session') toast.error('The gym just closed.');
-    else if (r.result === 'already') toast.info("You're already checked in.");
+    else if (r.result === 'already') toast.info('You’re already checked in.');
     else if (r.result !== 'checked_in') {
       // Never claim success for a reply we don't understand (e.g. an older app version).
-      toast.error("Couldn't check you in. Refresh the page and try again.");
+      toast.error('Couldn’t check you in. Refresh the page and try again.');
       return;
     } else
       toast.success(
         r.pass
           ? 'Checked in. Covered by your pass.'
           : r.freeDay
-            ? 'Checked in. It’s a free day, so no charge today!'
+            ? 'Checked in. It’s a free day, so no charge today.'
             : (r.balanceCents ?? 0) < 0
-            ? `Checked in. Balance ${balanceText(r.balanceCents ?? 0)}.`
-            : `Checked in. ${money(r.feeCents ?? 0)} from your credit.`,
+              ? `Checked in. Balance ${balanceText(r.balanceCents ?? 0)}.`
+              : r.feeCents === undefined
+                ? 'Checked in.'
+                : `Checked in. ${money(r.feeCents)} from your credit.`,
       );
   }
 
@@ -214,7 +226,7 @@ function SessionCard({ s, onChange }: { s: MySession; onChange: () => void }) {
         </div>
         {s.checkedIn ? (
           <Badge className="h-9 gap-1.5 bg-success px-3 text-sm text-white">
-            <CheckCircle2 className="size-4" /> You're checked in
+            <CheckCircle2 className="size-4" /> You’re checked in
           </Badge>
         ) : (
           <div className="flex flex-col gap-2 sm:items-end">
@@ -229,7 +241,7 @@ function SessionCard({ s, onChange }: { s: MySession; onChange: () => void }) {
                     : 'Check in'}
             </Button>
             {s.payState === 'blocked' && (
-              <div className="text-sm text-primary-foreground/80">Your balance is {balanceText(s.balanceCents)}. Pay to check in.</div>
+              <div className="text-sm text-primary-foreground/80">Your balance is {balanceText(s.balanceCents)}. Add credit to keep playing.</div>
             )}
           </div>
         )}
@@ -242,13 +254,15 @@ function SessionCard({ s, onChange }: { s: MySession; onChange: () => void }) {
 
 function PlanCard({ s, className, onBuy }: { s: MySession; className?: string; onBuy: () => void }) {
   const offers = s.options.plans.filter((o) => o.status !== 'not_offered');
+  const fee = s.feeCents || 500;
+  const yearListed = offers.some((o) => o.plan === 'year');
 
   return (
     <Card className={className}>
       <CardHeader>
         <CardTitle>Your plan</CardTitle>
         <CardDescription>
-          {s.pass ? `${planName(s.pass.plan)} · ${s.pass.label}` : `Pay as you go · ${money(s.feeCents)} per session`}
+          {s.pass ? `${planName(s.pass.plan)} · ${s.pass.label}` : `Pay as you go · ${money(fee)} per session`}
         </CardDescription>
         {s.pass && (
           <CardAction>
@@ -257,6 +271,7 @@ function PlanCard({ s, className, onBuy }: { s: MySession; className?: string; o
         )}
       </CardHeader>
       <CardContent className="space-y-3">
+        {offers.length === 0 && <p className="text-sm text-muted-foreground">No passes are on sale right now.</p>}
         {offers.map((o) => (
           <div
             key={o.plan}
@@ -271,17 +286,18 @@ function PlanCard({ s, className, onBuy }: { s: MySession; className?: string; o
               </div>
             </div>
             {o.status === 'available' && (
-              <Button size="sm" variant="outline" onClick={onBuy}>
+              <Button size="sm" variant="outline" onClick={onBuy} aria-label={`Buy ${planName(o.plan)}`}>
                 Buy
               </Button>
             )}
           </div>
         ))}
+        {!yearListed && <p className="text-xs text-muted-foreground">Year passes go on sale Apr 1 – Jun 30.</p>}
       </CardContent>
       <CardFooter className="text-xs text-muted-foreground">
         {s.options.cardEnabled
           ? 'Card, Apple Pay and Google Pay through Stripe, or cash to an admin.'
-          : "Card payments aren't set up yet. Pay cash to an admin."}
+          : 'Card payments aren’t set up yet. Pay cash to an admin.'}
       </CardFooter>
     </Card>
   );
@@ -306,7 +322,7 @@ function AttendanceChart({ checkins, className }: { checkins: any[]; className?:
     <Card className={className}>
       <CardHeader>
         <CardTitle>Attendance</CardTitle>
-        <CardDescription>Sessions per month, last 6 months</CardDescription>
+        <CardDescription>Check-ins per month, last 6 months</CardDescription>
       </CardHeader>
       <CardContent>
         <ChartContainer config={chartConfig} className="aspect-auto h-48 w-full">
@@ -386,7 +402,7 @@ function HistoryCard({ checkins, payments }: { checkins: any[]; payments: any[] 
                     <TableRow key={p.paymentId}>
                       <TableCell className="font-medium">{dateOf(p.createdAt)}</TableCell>
                       <TableCell className="text-muted-foreground">
-                        {p.plan ? planName(p.plan) : 'Credit'} · {p.method}
+                        {p.plan ? planName(p.plan) : 'Credit'} · {p.method === 'cash' ? 'Cash' : p.method === 'card' ? 'Card' : p.method}
                       </TableCell>
                       <TableCell>
                         <StatusBadge status={p.status} />
@@ -460,6 +476,7 @@ function PinCard() {
               inputMode="numeric"
               autoComplete="new-password"
               maxLength={6}
+              description="4 to 6 digits"
             />
           </div>
           <Button type="submit" className="sm:mt-[1.6rem]" disabled={form.formState.isSubmitting}>

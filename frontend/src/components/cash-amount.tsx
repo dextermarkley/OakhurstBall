@@ -30,7 +30,7 @@ export function CashAmountPicker({
           variant="outline"
           size={lg ? 'icon-lg' : 'icon'}
           className={cn('rounded-full', lg && 'size-14 [&_svg]:size-6')}
-          aria-label="$5 less"
+          aria-label={`${money(CASH_STEP_CENTS)} less`}
           disabled={disabled || value <= CASH_STEP_CENTS}
           onClick={() => set(value - CASH_STEP_CENTS)}
         >
@@ -43,13 +43,14 @@ export function CashAmountPicker({
           variant="outline"
           size={lg ? 'icon-lg' : 'icon'}
           className={cn('rounded-full', lg && 'size-14 [&_svg]:size-6')}
-          aria-label="$5 more"
+          aria-label={`${money(CASH_STEP_CENTS)} more`}
           disabled={disabled || value >= CASH_MAX_CENTS}
           onClick={() => set(value + CASH_STEP_CENTS)}
         >
           <Plus />
         </Button>
       </div>
+      {value >= CASH_MAX_CENTS && <p className="text-xs text-muted-foreground">Max {money(CASH_MAX_CENTS)}</p>}
       <div className="flex gap-2" role="group" aria-label="Quick amounts">
         {QUICK.map((c) => (
           <Button

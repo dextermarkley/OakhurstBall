@@ -36,8 +36,8 @@ Items: `PLAYER#<pid> / PASS#<periodId>` (periodId `Q2026-3` or `Y2026`), with
   while `closesAt` is in the future.
 - **Paying at check-in.** A pass holder, or anyone whose credit covers the $5, is
   checked in straight away. Anyone else is asked how they want to pay first:
-  - balance $0 down to −$5: they can pay (card, cash or a pass) or tap **Pay next time**;
-    either way they're checked in and can carry a balance of up to −$10.
+  - balance from $0 down to −$5: they can pay (card, cash or a pass) or tap **Pay next time**;
+    either way they're checked in and can owe up to $10.
   - balance below −$5 (the fee would pass −$10): they must pay first; the kiosk checks
     them in once the payment clears.
   API: check-in takes `mode` — `auto` (default; returns `needs_payment` or `limit`
@@ -58,12 +58,15 @@ Live test: `node test/live-sessions.mjs` (refuses to run while a real session is
 ## Paying at the entrance kiosk
 
 After check-in, a player who owes money (or is blocked) can pay:
-   - **$20 card** (Stripe Checkout: card, Apple Pay, Google Pay). The kiosk shows a QR
-     code so players pay on their own phone with their own wallet; "Pay on this
-     kiosk" is the fallback. The $20 is credit: after today's $5, $15 remains and
-     covers the next three check-ins with no payment step.
-   - **$5 cash**: player picks the admin they hand it to; that admin gets an SMS with
-     a one-tap confirm link.
+
+- **$20 card** (Stripe Checkout: card, Apple Pay, Google Pay). The kiosk shows a QR
+  code so players pay on their own phone with their own wallet; "Pay on this
+  kiosk" is the fallback. The $20 is credit: after today's $5, $15 remains and
+  covers the next three check-ins with no payment step.
+- **Cash**: in $5 steps from $5 up to `MAX_CASH_CENTS` ($200). The player picks the
+  admin they hand it to; that admin gets an email (and a push notification, if
+  enabled) with a one-tap confirm link.
+- **Passes** (quarter or year) can be bought at the kiosk by card or cash at a fixed price.
 
 Amounts are fixed server-side (`DAILY_FEE_CENTS`, `CARD_AMOUNT_CENTS`,
 `CASH_AMOUNT_CENTS` on the api Lambda); the kiosk never sends an amount.
@@ -74,7 +77,7 @@ Every payment is written `pending`, then settled by one DynamoDB transaction tha
 conditioned on `status = pending` and credits the balance. A second settle attempt
 fails the condition and does nothing.
 
-- **Cash** settles when the admin taps confirm (or deny) on the SMS link.
+- **Cash** settles when the admin taps confirm (or deny) on the emailed link.
 - **Card** settles when Stripe says the Checkout session is paid, learned from any of:
   the kiosk polling while the QR is up, the payer's phone landing on `/paid`, or the
   Stripe webhook. Each path re-reads the session from Stripe and checks the payment
@@ -102,10 +105,10 @@ Webhook endpoint (Stripe Dashboard → Developers → Webhooks):
 No redeploy is needed; the Lambda reads the parameters on demand. Until the secret
 key exists, the kiosk shows card as unavailable and cash still works.
 
-Fees: Stripe 2.9% + $0.30 → $0.88 on a $20 payment. SNS SMS ≈ $0.0075 per cash text.
+Fees: Stripe 2.9% + $0.30 → $0.88 on a $20 payment (quarter pass $2.62, year pass $9.58).
 
 ## Tests
 
-- `npm test` (backend): webhook signature verification, Pacific day boundary.
+- `npm test` (backend): webhook signature verification, club-time day boundary (Pacific by default).
 - `node test/live-smoke.mjs`: end-to-end against the deployed stack with a throwaway
-  kiosk + player (cleaned up after; sends no SMS).
+  kiosk + player (cleaned up after; sends no email).

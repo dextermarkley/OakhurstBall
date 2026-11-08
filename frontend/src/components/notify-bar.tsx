@@ -52,13 +52,15 @@ export function NotifyBar({ isAdmin }: { isAdmin?: boolean }) {
               </div>
               <div className="min-w-0">
                 <div className="font-medium">
-                  {blocked ? 'Notifications are blocked' : n.error ? "Notifications didn't turn on" : 'Turn on notifications'}
+                  {blocked ? 'Notifications are blocked' : n.error ? 'Notifications didn’t turn on' : 'Turn on notifications'}
                 </div>
                 <div className="text-muted-foreground">
                   {blocked
-                    ? 'Allow them in your settings to hear when the gym opens and when payments go through.'
+                    ? isAdmin
+                      ? 'Allow them in your settings to get alerts for the gym opening and for cash payments to confirm.'
+                      : 'Allow them in your settings to get alerts for the gym opening and your payments.'
                     : isAdmin
-                      ? 'Get cash payments to confirm, plus when the gym opens.'
+                      ? 'Get alerts when someone hands you cash to confirm, and when the gym opens.'
                       : 'Know when the gym opens and when your payments go through.'}
                 </div>
               </div>
@@ -97,9 +99,9 @@ export function NotifyHelpDialog({ open, onClose, isAdmin }: { open: boolean; on
       toast.success('Notifications are on', { description: 'We sent a test notification to this device.' });
       onClose();
     } else if (r === 'dismissed') {
-      toast.info('Choose Allow when your browser asks, to get notifications.');
+      toast.info('To get notifications, choose Allow when your browser asks.');
     } else if (r === 'error') {
-      toast.error("Couldn't turn on notifications", { description: 'Check your connection and try again.' });
+      toast.error('Couldn’t turn on notifications', { description: 'Check your connection and try again.' });
     }
     // 'denied' → the dialog switches to the unblock steps on its own.
   };
@@ -126,7 +128,7 @@ export function NotifyHelpDialog({ open, onClose, isAdmin }: { open: boolean; on
           {(on || n.permission === 'denied') && (
             <DialogDescription>
               {on
-                ? "You're all set on this device."
+                ? 'You’re all set on this device.'
                 : 'This device blocked notifications for Oakhurst Basketball, so the app can’t ask again. Allow them in settings:'}
             </DialogDescription>
           )}
@@ -134,12 +136,13 @@ export function NotifyHelpDialog({ open, onClose, isAdmin }: { open: boolean; on
 
         {!on && n.permission !== 'denied' && (
           <>
+            <p className="text-sm">We’ll let you know when:</p>
             <ul className="space-y-1.5 text-sm">
-              <Bullet>Today’s session is announced, so you can RSVP</Bullet>
-              <Bullet>The gym is open and pickup has started</Bullet>
-              <Bullet>Your payment went through, or a cash payment wasn’t confirmed</Bullet>
-              {isAdmin && <Bullet>Someone handed you cash and it needs confirming</Bullet>}
-              <Bullet>New chat messages, if you turn that on in the chat</Bullet>
+              <Bullet>Today’s session is announced (so you can RSVP)</Bullet>
+              <Bullet>The gym opens and pickup starts</Bullet>
+              <Bullet>Your payment goes through, or a cash payment isn’t confirmed</Bullet>
+              {isAdmin && <Bullet>Someone hands you cash and it needs confirming</Bullet>}
+              <Bullet>There are new chat messages (if you turn that on in the chat)</Bullet>
             </ul>
             {iosNotInstalled ? (
               <Steps
@@ -152,7 +155,7 @@ export function NotifyHelpDialog({ open, onClose, isAdmin }: { open: boolean; on
             ) : (
               <Steps
                 items={[
-                  <>Click <b>Turn on notifications</b> below.</>,
+                  'Press the button below.',
                   <>When {browserName(n.platform)} asks, choose <b>Allow</b>.</>,
                   'We’ll send a test notification so you know it worked.',
                 ]}
@@ -232,25 +235,25 @@ function unblockSteps(p: Platform): ReactNode[] {
       return [
         <>Open the <b>Settings</b> app, then <b>Notifications</b>.</>,
         <>Tap <b>Oakhurst</b> and turn on <b>Allow Notifications</b>.</>,
-        'Come back here and tap I’ve allowed them.',
+        'Come back here and tap “I’ve allowed them”.',
       ];
     case 'android':
       return [
         <>Touch and hold the Oakhurst icon, then tap <b>App info</b>.</>,
         <>Tap <b>Notifications</b> and turn them on.</>,
-        'Come back here and tap I’ve allowed them.',
+        'Come back here and tap “I’ve allowed them”.',
       ];
     case 'mac-safari':
       return [
         <>Open <b>System Settings</b> → <b>Notifications</b>.</>,
         <>Choose <b>Oakhurst Basketball</b> and turn on <b>Allow notifications</b>.</>,
-        'Come back here and click I’ve allowed them.',
+        'Come back here and click “I’ve allowed them”.',
       ];
     default:
       return [
-        <>In this app window, click the <b>⋮</b> or <b>…</b> menu at the top right, then <b>App info</b> (or <b>Site settings</b>).</>,
+        <>Open the <b>⋮</b> or <b>…</b> menu at the top right, then <b>App info</b> (installed app) or <b>Site settings</b> (browser).</>,
         <>Set <b>Notifications</b> to <b>Allow</b>.</>,
-        'Come back here and click I’ve allowed them.',
+        'Come back here and click “I’ve allowed them”.',
       ];
   }
 }

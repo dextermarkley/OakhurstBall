@@ -1,7 +1,7 @@
 # Deploy guide
 
 One stack (`OakhurstBasketball`), one region: account `124705683281`, `us-west-2`.
-No CloudFront, no S3, nothing in us-east-1.
+No CloudFront. One private S3 bucket (chat images). Nothing in us-east-1.
 
 ## Deploy
 
@@ -53,7 +53,7 @@ aws cognito-idp admin-add-user-to-group --region us-west-2 \
   --user-pool-id us-west-2_sgaAJES20 --username <your-email> --group-name admin
 ```
 
-Then Admin → Admins: add yourself with your phone (E.164) to receive confirm texts.
+Then Admin → Admins: add yourself with your email to receive cash-confirm emails.
 
 ## Kiosk
 

@@ -3,6 +3,9 @@
 export const money = (cents: number) =>
   (Math.abs(cents) / 100).toLocaleString('en-US', { style: 'currency', currency: 'USD' });
 
+/** Money with an explicit minus sign for negatives: "−$5.00". */
+export const signedMoney = (cents: number) => (cents < 0 ? `−${money(cents)}` : money(cents));
+
 /** "$12.00 credit", "−$5.00", "$0.00" */
 export function balanceText(cents: number) {
   if (cents < 0) return `−${money(cents)}`;
@@ -29,6 +32,6 @@ export const initials = (name: string) =>
     .filter(Boolean)
     .slice(0, 2)
     .map((w) => w[0]!.toUpperCase())
-    .join('');
+    .join('') || '?';
 
 export const planName = (plan: 'quarter' | 'year') => (plan === 'year' ? 'Year pass' : 'Quarter pass');

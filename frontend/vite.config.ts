@@ -31,7 +31,7 @@ export default defineConfig({
       manifest: {
         name: 'Oakhurst Basketball',
         short_name: 'Oakhurst',
-        description: 'Check in, pay, and track your pickup basketball sessions.',
+        description: 'Check in, pay, and track your pickup basketball sessions at Oakhurst.',
         start_url: '/',
         scope: '/',
         display: 'standalone',

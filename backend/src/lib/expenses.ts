@@ -35,7 +35,7 @@ export interface ExpenseInput {
 /** Validate an expense from the API. Returns the clean input or an error message. */
 export function checkExpense(b: any, today: string): { input?: ExpenseInput; error?: string } {
   const date = String(b?.date ?? '');
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || Number.isNaN(Date.parse(`${date}T12:00:00Z`))) return { error: 'date must be YYYY-MM-DD' };
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || Number.isNaN(Date.parse(`${date}T12:00:00Z`))) return { error: 'Enter the date as YYYY-MM-DD' };
   // Real calendar date (rejects 2026-02-30) and not in a far-off year.
   const d = new Date(`${date}T12:00:00Z`);
   if (d.toISOString().slice(0, 10) !== date) return { error: 'date must be a real date' };
@@ -43,10 +43,10 @@ export function checkExpense(b: any, today: string): { input?: ExpenseInput; err
   if (yearsAway > 5) return { error: 'date is too far from today' };
   if (date > addDays(today, 31)) return { error: 'date can’t be more than a month ahead' };
   const category = String(b?.category ?? '') as Category;
-  if (!CATEGORIES.includes(category)) return { error: `category must be one of ${CATEGORIES.join(', ')}` };
+  if (!CATEGORIES.includes(category)) return { error: 'Pick a category' };
   const amountCents = Number(b?.amountCents);
   if (!Number.isInteger(amountCents) || amountCents <= 0) return { error: 'amount must be more than $0' };
-  if (amountCents > MAX_EXPENSE_CENTS) return { error: 'amount is too large' };
+  if (amountCents > MAX_EXPENSE_CENTS) return { error: 'Amount can’t be more than $100,000' };
   const note = String(b?.note ?? '').replace(/\s+/g, ' ').trim();
   if (note.length > 200) return { error: 'note must be 200 characters or fewer' };
   return { input: { date, category, amountCents, note: note || undefined } };

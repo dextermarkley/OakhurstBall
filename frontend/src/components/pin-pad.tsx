@@ -32,6 +32,7 @@ export function PinPad({
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (disabled) return;
       if (/^\d$/.test(e.key)) push(e.key);
       else if (e.key === 'Backspace') setPin((p) => p.slice(0, -1));
       else if (e.key === 'Enter' && pin.length >= min) submit(pin);
@@ -46,7 +47,8 @@ export function PinPad({
 
   return (
     <div className="mx-auto w-full max-w-xs">
-      <div className="mb-6 flex h-6 items-center justify-center gap-3" aria-live="polite" aria-label={`${pin.length} digits entered`}>
+      <div className="mb-6 flex h-6 items-center justify-center gap-3" role="status" aria-live="polite">
+        <span className="sr-only">{pin.length} digits entered</span>
         {Array.from({ length: Math.max(min, pin.length) }).map((_, i) => (
           <span
             key={i}

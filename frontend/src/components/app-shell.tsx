@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
-import { Bell, BellOff, Download, Home, LogOut, MessagesSquare, RefreshCw, Repeat, ScrollText } from 'lucide-react';
+import { Bell, BellOff, Download, Home, LogOut, MessagesSquare, RefreshCw, ScrollText, ShieldCheck, UserRound } from 'lucide-react';
 import { AgreementsDialog } from '@/views/Agreements';
 import { promptInstall, useInstall } from '@/install';
 import { InstallHelpDialog } from '@/components/install-banner';
@@ -67,8 +67,8 @@ export function AppShell({
           <div className="flex-1" />
           {signedIn &&
             (inChat ? (
-              <Button variant="ghost" size="sm" render={<Link to="/player" />}>
-                <Home /> <span className="hidden sm:inline">My page</span>
+              <Button variant="ghost" size="sm" render={<Link to="/player" />} aria-label="My account">
+                <Home /> <span className="hidden sm:inline">My account</span>
               </Button>
             ) : (
               <Button variant="ghost" size="sm" render={<Link to="/chat" />} aria-label={chatUnread ? 'Chat, new messages' : 'Chat'}>
@@ -79,7 +79,7 @@ export function AppShell({
                 <span className="hidden sm:inline">Chat</span>
               </Button>
             ))}
-          {user && onSignOut && <UserMenu user={user} onSignOut={onSignOut} />}
+          {user && onSignOut && <UserMenu user={user} onSignOut={onSignOut} section={section} />}
         </div>
       </header>
       <main
@@ -97,7 +97,7 @@ export function AppShell({
   );
 }
 
-function UserMenu({ user, onSignOut }: { user: ShellUser; onSignOut: () => void }) {
+function UserMenu({ user, onSignOut, section }: { user: ShellUser; onSignOut: () => void; section: string }) {
   const updateReady = useUpdateReady();
   const n = useNotifications();
   const inst = useInstall();
@@ -137,28 +137,32 @@ function UserMenu({ user, onSignOut }: { user: ShellUser; onSignOut: () => void 
         <DropdownMenuSeparator />
         {user.isAdmin && (
           <>
-            <DropdownMenuItem render={<Link to="/admin" />}>
-              <Repeat /> Admin console
-            </DropdownMenuItem>
-            <DropdownMenuItem render={<Link to="/player" />}>
-              <Repeat /> My player page
-            </DropdownMenuItem>
+            {section !== 'Admin' && (
+              <DropdownMenuItem render={<Link to="/admin" />}>
+                <ShieldCheck /> Admin console
+              </DropdownMenuItem>
+            )}
+            {section !== 'Account' && (
+              <DropdownMenuItem render={<Link to="/player" />}>
+                <UserRound /> My account
+              </DropdownMenuItem>
+            )}
             <DropdownMenuSeparator />
           </>
         )}
         {canInstall && (
           <DropdownMenuItem onClick={install}>
-            <Download /> Install the app
+            <Download /> Install the Oakhurst app
           </DropdownMenuItem>
         )}
         {n.supported && (
           <DropdownMenuItem onClick={() => setHelp(true)}>
             {n.subscribed ? <Bell /> : <BellOff />}
-            {n.subscribed ? 'Notifications on' : 'Turn on notifications'}
+            {n.subscribed ? 'Notification settings' : 'Turn on notifications'}
           </DropdownMenuItem>
         )}
         <DropdownMenuItem onClick={() => setDocs(true)}>
-          <ScrollText /> Waiver & club rules
+          <ScrollText /> Waiver and Club Rules
         </DropdownMenuItem>
         <DropdownMenuItem onClick={onSignOut}>
           <LogOut /> Sign out

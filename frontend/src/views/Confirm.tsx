@@ -34,6 +34,8 @@ export function ConfirmPage() {
     }
   }
 
+  const extra = detail?.note ? String(detail.note).split(' — ').slice(2).join(' — ') : '';
+  const expired = /expire|invalid|not found|no longer|used/i.test(error);
   const finished = result || (detail && detail.status !== 'pending');
 
   return (
@@ -45,7 +47,7 @@ export function ConfirmPage() {
       <Card className="w-full max-w-sm">
         <CardContent className="text-center">
           {error && !detail && (
-            <Outcome icon={<Clock className="size-7" />} tone="muted" title="Link expired" body={error} />
+            <Outcome icon={<Clock className="size-7" />} tone="muted" title={expired ? 'Link expired' : 'Couldn’t load this payment'} body={expired ? error : `${error} Check your connection and reload.`} />
           )}
           {!error && !detail && (
             <div className="space-y-3 py-4">
@@ -57,7 +59,7 @@ export function ConfirmPage() {
 
           {detail && finished && (
             result === 'confirmed' ? (
-              <Outcome icon={<CheckCircle2 className="size-7" />} tone="success" title="Payment confirmed" body="It's been added to their account. You can close this page." />
+              <Outcome icon={<CheckCircle2 className="size-7" />} tone="success" title="Payment confirmed" body="It’s been added to their account. You can close this page." />
             ) : result === 'denied' ? (
               <Outcome icon={<XCircle className="size-7" />} tone="danger" title="Payment denied" body="Nothing was credited. You can close this page." />
             ) : (
@@ -73,10 +75,10 @@ export function ConfirmPage() {
               <p className="text-sm text-muted-foreground">Did you receive</p>
               <div className="tabular my-1 text-4xl font-semibold tracking-tight">{money(detail.amountCents)}</div>
               <p className="text-sm text-muted-foreground">
-                {detail.method === 'cash' ? 'cash' : detail.method} from{' '}
+                {detail.method === 'card' ? 'by card' : 'in cash'} from{' '}
                 <span className="font-medium text-foreground">{detail.playerName}</span>
               </p>
-              {detail.note && <p className="mt-1 text-xs text-muted-foreground">{detail.note.split(' — ').slice(2).join(' — ')}</p>}
+              {extra && <p className="mt-1 text-xs text-muted-foreground">{extra}</p>}
               <p className="mt-1 text-xs text-muted-foreground">
                 {dateOf(detail.createdAt)} at {timeOf(detail.createdAt)}
               </p>
@@ -90,7 +92,7 @@ export function ConfirmPage() {
                   {busy === 'confirm' ? <Spinner /> : <CheckCircle2 />} Yes, I received it
                 </Button>
                 <Button size="lg" variant="outline" className="h-11" disabled={!!busy} onClick={() => act('deny')}>
-                  {busy === 'deny' && <Spinner />} No, I didn't
+                  {busy === 'deny' && <Spinner />} No, I didn’t
                 </Button>
               </div>
             </>

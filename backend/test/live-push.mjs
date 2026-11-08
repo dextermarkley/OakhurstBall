@@ -66,7 +66,7 @@ try {
   check('GET /me/push returns the VAPID public key', r.status === 200 && r.body.publicKey === ssmKey, r);
 
   r = await a('POST', '/me/push', { subscription: { ...subscription, endpoint: 'https://evil.example.com/x' } });
-  check('rejects a non-push-service endpoint', r.status === 400 && r.body.error === 'unsupported push service', r);
+  check('rejects a non-push-service endpoint', r.status === 400 && typeof r.body.error === 'string' && r.body.error.startsWith('Couldn’t turn on notifications'), r);
   r = await a('POST', '/me/push', { subscription: { ...subscription, keys: { p256dh: 'short', auth: 'x' } } });
   check('rejects bad keys', r.status === 400, r);
   r = await a('POST', '/me/push', {});

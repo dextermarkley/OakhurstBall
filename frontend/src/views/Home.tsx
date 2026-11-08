@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom';
-import { ArrowRight, CalendarCheck, CreditCard, ShieldCheck, UserRound } from 'lucide-react';
+import { ArrowRight, CalendarCheck, CreditCard, ShieldCheck, Ticket, UserRound } from 'lucide-react';
 import { Logo } from '@/components/brand';
 import { Card, CardContent } from '@/components/ui/card';
 
@@ -7,7 +7,7 @@ const entries = [
   {
     to: '/player',
     icon: UserRound,
-    title: 'Player',
+    title: 'My account',
     body: 'Check in, see your balance and pass, and review your attendance.',
   },
   {
@@ -61,7 +61,7 @@ export function Home() {
           {[
             { icon: CalendarCheck, t: 'Pay as you go', d: '$5 per session, taken from your balance.' },
             { icon: CreditCard, t: 'Quarter pass', d: '$80 covers every session for the quarter.' },
-            { icon: ShieldCheck, t: 'Year pass', d: '$320 for the full season, sold Apr 1 – Jun 30.' },
+            { icon: Ticket, t: 'Year pass', d: '$320 for the full season, sold Apr 1 – Jun 30.' },
           ].map(({ icon: Icon, t, d }) => (
             <div key={t} className="flex gap-3">
               <Icon className="mt-0.5 size-5 shrink-0 text-brand" />

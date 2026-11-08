@@ -24,11 +24,11 @@ export function Paid() {
   }, [sessionId]);
 
   useEffect(() => {
-    if (isKiosk && (cancelled || result || error)) {
+    if (isKiosk && (cancelled || !sessionId || result || error)) {
       const t = setTimeout(() => window.location.assign('/kiosk'), 5000);
       return () => clearTimeout(t);
     }
-  }, [isKiosk, cancelled, result, error]);
+  }, [isKiosk, cancelled, sessionId, result, error]);
 
   let icon = <Spinner className="size-7" />;
   let tone = 'bg-muted text-muted-foreground';
@@ -38,16 +38,26 @@ export function Paid() {
     icon = <XCircle className="size-7" />;
     title = 'Payment cancelled';
     body = 'No money was taken.';
+  } else if (!sessionId) {
+    icon = <XCircle className="size-7" />;
+    tone = 'bg-destructive/10 text-destructive';
+    title = 'We couldn’t confirm that payment';
+    body = 'This link is missing its payment details. Check your balance on your account page.';
   } else if (error) {
     icon = <XCircle className="size-7" />;
     tone = 'bg-destructive/10 text-destructive';
-    title = "We couldn't confirm that payment";
+    title = 'We couldn’t confirm that payment';
     body = error;
   } else if (result?.status === 'confirmed') {
     icon = <CheckCircle2 className="size-7" />;
     tone = 'bg-success/12 text-success';
     title = `Paid ${money(result.amountCents)}`;
-    body = "It's on your Oakhurst Basketball account. Have a good game!";
+    body = 'Your balance is updated. See you on the court!';
+  } else if (result && ['denied', 'failed', 'expired'].includes(result.status)) {
+    icon = <XCircle className="size-7" />;
+    tone = 'bg-destructive/10 text-destructive';
+    title = 'Payment didn’t go through';
+    body = 'No money was taken. Please try again.';
   } else if (result) {
     icon = <Clock className="size-7" />;
     tone = 'bg-brand/12 text-brand';
@@ -69,7 +79,7 @@ export function Paid() {
           <Button className="mt-6 w-full" size="lg" render={<Link to={isKiosk ? '/kiosk' : '/player'} />}>
             {isKiosk ? 'Back to check-in' : 'Back to my account'}
           </Button>
-          {isKiosk && <p className="mt-2 text-xs text-muted-foreground">Returning automatically…</p>}
+          {isKiosk && (cancelled || !sessionId || result || error) && <p className="mt-2 text-xs text-muted-foreground">Returning automatically…</p>}
         </CardContent>
       </Card>
     </div>

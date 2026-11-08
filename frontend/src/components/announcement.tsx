@@ -1,5 +1,5 @@
-// Today's session announcement ("Ball today OCI - 5:30") with RSVPs.
-//   AnnouncementCard — player page: read it, RSVP, see who's coming
+// Today’s session announcement ("Ball today OCI - 5:30") with RSVPs.
+//   AnnouncementCard — player page: read it, RSVP, see who’s coming
 //   AnnounceAdminCard — admin Sessions tab: post / edit / take down
 import { useCallback, useEffect, useState } from 'react';
 import { Check, CircleHelp, Megaphone, Pencil, Trash2, X } from 'lucide-react';
@@ -30,7 +30,7 @@ function useAnnouncement(pollMs: number) {
   return { data, setData, load };
 }
 
-/** Player page card. Renders nothing when there's no announcement today. */
+/** Player page card. Renders nothing when there’s no announcement today. */
 export function AnnouncementCard() {
   const { data, setData } = useAnnouncement(30_000);
   const [busy, setBusy] = useState<RsvpStatus | 'clear' | null>(null);
@@ -62,8 +62,8 @@ export function AnnouncementCard() {
           <span className="leading-snug">{a.text}</span>
         </CardTitle>
         <CardDescription className="pl-11">
-          {a.createdByName} · {timeOf(a.updatedAt)}
-          {a.updatedAt !== a.createdAt && ' (edited)'}
+          {a.createdByName} · {timeOf(a.createdAt)}
+          {a.updatedAt !== a.createdAt && ` · edited ${timeOf(a.updatedAt)}`}
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4 pl-[3.75rem]">
@@ -75,7 +75,7 @@ export function AnnouncementCard() {
             onClick={() => rsvp('in')}
             aria-pressed={mine === 'in'}
           >
-            {busy === 'in' ? <Spinner /> : <Check />} I'm in
+            {busy === 'in' ? <Spinner /> : <Check />} I’m in
           </Button>
           <Button
             variant={mine === 'maybe' ? 'default' : 'outline'}
@@ -92,20 +92,25 @@ export function AnnouncementCard() {
             onClick={() => rsvp('out')}
             aria-pressed={mine === 'out'}
           >
-            {busy === 'out' ? <Spinner /> : <X />} Can't make it
+            {busy === 'out' ? <Spinner /> : <X />} Can’t make it
           </Button>
         </div>
+        {!data?.myPlayerId ? (
+          <p className="text-xs text-muted-foreground">Create your player profile to RSVP.</p>
+        ) : (
+          mine && <p className="text-xs text-muted-foreground">Tap again to undo.</p>
+        )}
         <RsvpLists rsvps={a.rsvps} />
       </CardContent>
     </Card>
   );
 }
 
-export function RsvpLists({ rsvps }: { rsvps: Rsvp[] }) {
+export function RsvpLists({ rsvps, emptyText = 'No RSVPs yet. Be the first.' }: { rsvps: Rsvp[]; emptyText?: string }) {
   const ins = rsvps.filter((r) => r.status === 'in');
   const maybes = rsvps.filter((r) => r.status === 'maybe');
   const outs = rsvps.filter((r) => r.status === 'out');
-  if (!rsvps.length) return <p className="text-sm text-muted-foreground">No RSVPs yet. Be the first.</p>;
+  if (!rsvps.length) return <p className="text-sm text-muted-foreground">{emptyText}</p>;
   return (
     <div className="space-y-3">
       <div>
@@ -149,7 +154,7 @@ export function RsvpLists({ rsvps }: { rsvps: Rsvp[] }) {
       )}
       {outs.length > 0 && (
         <div className="text-sm text-muted-foreground">
-          <span className="font-medium">Can't make it:</span> {outs.map((r) => r.name).join(', ')}
+          <span className="font-medium">Can’t make it:</span> {outs.map((r) => r.name).join(', ')}
         </div>
       )}
     </div>
@@ -176,7 +181,7 @@ export function AnnounceAdminCard() {
     try {
       const r = await api.postAnnouncement(text.trim());
       setData((d) => (d ? { ...d, announcement: r.announcement } : d));
-      toast.success('Announced. Everyone with notifications on was notified.');
+      toast.success('Posted. Players with notifications on will get an alert.');
     } catch (e: any) {
       toast.error(e.message);
     } finally {
@@ -190,7 +195,7 @@ export function AnnounceAdminCard() {
       const r = await api.editAnnouncement(a.announceId, text.trim(), notify);
       setData((d) => (d ? { ...d, announcement: r.announcement } : d));
       setEditing(false);
-      toast.success(notify ? 'Updated, and everyone was notified.' : 'Updated.');
+      toast.success(notify ? 'Updated. Players with notifications on will get an alert.' : 'Updated.');
     } catch (e: any) {
       toast.error(e.message);
       load();
@@ -219,7 +224,6 @@ export function AnnounceAdminCard() {
     }
   }
 
-  const tooLong = text.trim().length > 280;
   const field = (
     <Input
       id="announcement-text"
@@ -244,7 +248,7 @@ export function AnnounceAdminCard() {
           <CardDescription>
             {a
               ? 'RSVPs are kept.'
-              : 'Shows on everyone’s player page with RSVP buttons, and notifies everyone who has notifications on. It disappears at midnight.'}
+              : 'Shows on everyone’s account page with RSVP buttons, and notifies everyone who has notifications on. It disappears at midnight Pacific.'}
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
@@ -255,7 +259,7 @@ export function AnnounceAdminCard() {
               Notify everyone about the change
             </label>
           )}
-          {tooLong && <p className="text-sm text-destructive">Keep it under 280 characters.</p>}
+          <p className="text-right text-xs text-muted-foreground tabular">{text.length}/280</p>
         </CardContent>
         <CardFooter className="justify-end gap-2">
           {a && (
@@ -263,7 +267,7 @@ export function AnnounceAdminCard() {
               Cancel
             </Button>
           )}
-          <Button disabled={busy || !text.trim() || tooLong} onClick={a ? save : post}>
+          <Button disabled={busy || !text.trim()} onClick={a ? save : post}>
             {busy ? <Spinner /> : <Megaphone />} {a ? 'Save' : 'Post announcement'}
           </Button>
         </CardFooter>
@@ -300,7 +304,7 @@ export function AnnounceAdminCard() {
         </CardAction>
       </CardHeader>
       <CardContent className="pt-1">
-        <RsvpLists rsvps={a.rsvps} />
+        <RsvpLists rsvps={a.rsvps} emptyText="No RSVPs yet." />
       </CardContent>
     </Card>
   );
