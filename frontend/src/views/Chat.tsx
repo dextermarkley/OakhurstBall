@@ -469,7 +469,10 @@ function MessageList({
             <div
               role="toolbar"
               aria-label="Quick reactions"
-              className={cn('mt-1 flex items-center gap-0.5 rounded-full border bg-popover p-1 shadow-md', mine ? 'self-end' : 'self-start')}
+              className={cn(
+                'mt-1 flex max-w-[calc(100vw-5rem)] flex-wrap items-center gap-0.5 rounded-3xl border bg-popover p-1 shadow-md',
+                mine ? 'self-end' : 'self-start',
+              )}
             >
               {QUICK.map((e) => (
                 <button
@@ -477,7 +480,7 @@ function MessageList({
                   type="button"
                   aria-label={`React ${e}`}
                   onClick={() => onReact(m, e)}
-                  className="flex size-9 items-center justify-center rounded-full text-xl transition active:scale-90 hover:bg-muted"
+                  className="flex size-9 shrink-0 items-center justify-center rounded-full text-xl transition active:scale-90 hover:bg-muted"
                 >
                   {e}
                 </button>
