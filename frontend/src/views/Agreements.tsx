@@ -162,13 +162,7 @@ export function SignScreen({
               <CardDescription>{s.rules.intro}</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <ol className="space-y-2 text-sm">
-                {s.rules.sections.map((r, i) => (
-                  <li key={i} className="rounded-lg bg-muted/50 px-3 py-2">
-                    {r.body}
-                  </li>
-                ))}
-              </ol>
+              <RulesList doc={s.rules} />
               <CheckRow control={form.control} name="agreeRules" label="I’ve read the club rules and I’ll follow them." />
             </CardContent>
           </Card>
@@ -254,6 +248,32 @@ export function SignScreen({
           </Card>
         </form>
       </div>
+    </div>
+  );
+}
+
+/** Rules grouped under their headings ("Club rules", "Basketball play"). */
+function RulesList({ doc, compact }: { doc: AgreementDoc; compact?: boolean }) {
+  const groups: Array<{ heading?: string; items: string[] }> = [];
+  for (const s of doc.sections) {
+    const last = groups[groups.length - 1];
+    if (last && last.heading === s.heading) last.items.push(s.body);
+    else groups.push({ heading: s.heading, items: [s.body] });
+  }
+  return (
+    <div className={compact ? 'space-y-3' : 'space-y-4'}>
+      {groups.map((g, gi) => (
+        <div key={gi}>
+          {g.heading && <h3 className="mb-2 text-sm font-semibold">{g.heading}</h3>}
+          <ol className={cn('text-sm', compact ? 'space-y-1 text-muted-foreground' : 'space-y-2')}>
+            {g.items.map((body, i) => (
+              <li key={i} className={compact ? '' : 'rounded-lg bg-muted/50 px-3 py-2'}>
+                {body}
+              </li>
+            ))}
+          </ol>
+        </div>
+      ))}
     </div>
   );
 }
@@ -351,11 +371,7 @@ export function AgreementsDialog({ open, onClose }: { open: boolean; onClose: ()
           <div className="space-y-5">
             <div>
               <h3 className="mb-2 font-medium">{s.rules.title}</h3>
-              <ol className="space-y-1.5 text-sm text-muted-foreground">
-                {s.rules.sections.map((r, i) => (
-                  <li key={i}>{r.body}</li>
-                ))}
-              </ol>
+              <RulesList doc={s.rules} compact />
             </div>
             <div>
               <h3 className="mb-1 font-medium">{s.waiver.title}</h3>

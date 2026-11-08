@@ -89,20 +89,22 @@ export const WAIVER: Doc = {
 
 export const RULES: Doc = {
   kind: 'rules',
-  version: '2026-11-07',
+  // Bumped from 2026-11-07 when the rules were rewritten: everyone acknowledges again.
+  version: '2026-11-07.2',
   title: 'Oakhurst Basketball Club Rules',
-  intro: 'The official, legally binding-ish rules of the court.',
+  intro: 'How we keep pickup fun, fair and safe.',
   sections: [
-    { body: '1. Pay your $5 (or have a pass) before you play. The basketballs don’t buy themselves.' },
-    { body: '2. Call your own fouls. Calling a foul on a shot you clearly air-balled is a foul on everyone.' },
-    { body: '3. Check the ball at the top. Every time. Even when you were “pretty sure it was in.”' },
-    { body: '4. Winners stay on. Losers must say “good game” and mean at least 60% of it.' },
-    { body: '5. Nobody is getting scouted. Play hard, but don’t play like it’s Game 7.' },
-    { body: '6. No dunking on anyone over 40 without first apologizing to their knees.' },
-    { body: '7. Three missed free throws in a row puts you on next week’s ball-pumping duty.' },
-    { body: '8. If you get hurt or see someone hurt, stop play and tell an organizer. Then we can make fun of the stretch they didn’t do.' },
-    { body: '9. Leave the gym cleaner than you found it. Water bottles are not team members.' },
-    { body: '10. Be good to each other. That one isn’t silly.' },
+    { heading: 'Club rules', body: '1. Check in and pay before you play.' },
+    { heading: 'Club rules', body: '2. No fighting. You will be asked to leave.' },
+    { heading: 'Club rules', body: '3. Call your own fouls, be respectful.' },
+    { heading: 'Club rules', body: '4. Shoot a 3 to settle disputes quickly.' },
+    { heading: 'Club rules', body: '5. Play hard, but do not injure others.' },
+    { heading: 'Club rules', body: '6. Do not leave water bottles or trash.' },
+    { heading: 'Club rules', body: '7. Minors must bring a legal guardian, coach, or have approval to play from an admin.' },
+    { heading: 'Basketball play', body: '1. Shots count for 2 & 3.' },
+    { heading: 'Basketball play', body: '2. Most games will be to 15.' },
+    { heading: 'Basketball play', body: '3. Backcourt violations will be called.' },
+    { heading: 'Basketball play', body: '4. You cannot catch your own airball.' },
   ],
 };
 
