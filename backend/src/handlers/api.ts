@@ -325,7 +325,12 @@ async function kioskRouter(
     }
 
     if (pm === 'card') {
-      const { payment, checkoutUrl } = await createCardPayment({ playerId, playerName: player.name, plan });
+      const { payment, checkoutUrl } = await createCardPayment({
+        playerId,
+        playerName: player.name,
+        plan,
+        email: player.email,
+      });
       return created({ paymentId: payment.paymentId, amountCents: payment.amountCents, checkoutUrl });
     }
 
@@ -581,6 +586,7 @@ async function apiRouter(
       playerId: player.playerId,
       playerName: player.name,
       plan,
+      email: player.email || claims.email,
     });
     return created({ paymentId: payment.paymentId, amountCents: payment.amountCents, checkoutUrl });
   }

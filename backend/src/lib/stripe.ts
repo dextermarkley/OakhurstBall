@@ -74,6 +74,8 @@ export async function createCheckoutSession(input: {
   productName: string;
   productDescription: string;
   baseUrl: string;
+  /** Pre-fills Checkout's email field (still editable there). */
+  email?: string;
 }): Promise<CheckoutSession> {
   const expiresAt = Math.floor(Date.now() / 1000) + 35 * 60; // Stripe minimum is 30 min
   return stripe('POST', '/checkout/sessions', {
@@ -93,6 +95,7 @@ export async function createCheckoutSession(input: {
     'metadata[playerId]': input.playerId,
     'payment_intent_data[metadata][paymentId]': input.paymentId,
     expires_at: String(expiresAt),
+    ...(input.email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(input.email) ? { customer_email: input.email } : {}),
   });
 }
 

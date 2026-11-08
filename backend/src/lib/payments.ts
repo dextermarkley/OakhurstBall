@@ -360,7 +360,7 @@ export const confirmPayment = (token: string) => settleByToken(token, 'confirmed
 export const denyPayment = (token: string) => settleByToken(token, 'denied');
 
 // ─────────────────────────────── Card ──────────────────────────────────────
-export async function createCardPayment(input: { playerId: string; playerName: string; plan?: Plan }) {
+export async function createCardPayment(input: { playerId: string; playerName: string; plan?: Plan; email?: string }) {
   const paymentId = newId();
   const purchase = purchaseFor(input.plan, AMOUNTS.card);
   const session = await createCheckoutSession({
@@ -375,6 +375,7 @@ export async function createCardPayment(input: { playerId: string; playerName: s
       ? `${purchase.periodLabel} for ${input.playerName}`
       : `Account credit for ${input.playerName}`,
     baseUrl: baseUrl(),
+    email: input.email,
   });
   const { payment } = await writePending({
     paymentId,
