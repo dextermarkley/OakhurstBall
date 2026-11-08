@@ -50,17 +50,17 @@ Items: `PLAYER#<pid> / PASS#<periodId>` (periodId `Q2026-3` or `Y2026`), with
   must pay first. On the kiosk, a blocked player who pays is checked in
   automatically once the card clears or the admin confirms the cash.
 - The kiosk shows who is checked in and how many; a red dot marks players with a
-  negative balance (no amounts are shown on the iPad).
+  negative balance (no amounts are shown on the kiosk).
 - Admin → Sessions lists every session; click one to see who attended.
 
 Live test: `node test/live-sessions.mjs` (refuses to run while a real session is open).
 
-## Paying at the entrance iPad
+## Paying at the entrance kiosk
 
 After check-in, a player who owes money (or is blocked) can pay:
-   - **$20 card** (Stripe Checkout: card, Apple Pay, Google Pay). The iPad shows a QR
+   - **$20 card** (Stripe Checkout: card, Apple Pay, Google Pay). The kiosk shows a QR
      code so players pay on their own phone with their own wallet; "Pay on this
-     iPad" is the fallback. The $20 is credit: after today's $5, $15 remains and
+     kiosk" is the fallback. The $20 is credit: after today's $5, $15 remains and
      covers the next three check-ins with no payment step.
    - **$5 cash**: player picks the admin they hand it to; that admin gets an SMS with
      a one-tap confirm link.

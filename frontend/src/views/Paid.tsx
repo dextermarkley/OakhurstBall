@@ -1,6 +1,6 @@
 // Stripe Checkout returns here (usually on the player's own phone). The server
 // re-reads the session from Stripe and credits the balance if it is paid.
-// If this browser is the paired kiosk iPad, it goes back to check-in afterwards.
+// If this browser is the paired kiosk, it goes back to check-in afterwards.
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { CheckCircle2, Clock, XCircle } from 'lucide-react';

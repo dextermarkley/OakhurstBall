@@ -428,7 +428,7 @@ function PinCard() {
   const submit = form.handleSubmit(async (v) => {
     try {
       await api.setPin(v.pin);
-      toast.success('PIN saved. Use it at the entrance iPad.');
+      toast.success('PIN saved. Use it at the entrance kiosk.');
       form.reset();
     } catch (e: any) {
       toast.error(e.message);
@@ -442,7 +442,7 @@ function PinCard() {
           <CardTitle className="flex items-center gap-2">
             <KeyRound className="size-4 text-muted-foreground" /> Kiosk PIN
           </CardTitle>
-          <CardDescription>The PIN you enter on the entrance iPad after tapping your name.</CardDescription>
+          <CardDescription>The PIN you enter on the entrance kiosk after tapping your name.</CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-3 pt-4 sm:flex-row sm:items-start">
           <div className="sm:w-56">

@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom';
-import { ArrowRight, CalendarCheck, CreditCard, ShieldCheck, Tablet, UserRound } from 'lucide-react';
+import { ArrowRight, CalendarCheck, CreditCard, ShieldCheck, UserRound } from 'lucide-react';
 import { Logo } from '@/components/brand';
 import { Card, CardContent } from '@/components/ui/card';
 
@@ -14,13 +14,7 @@ const entries = [
     to: '/admin',
     icon: ShieldCheck,
     title: 'Admin',
-    body: 'Open sessions, manage players, confirm payments and pair iPads.',
-  },
-  {
-    to: '/kiosk',
-    icon: Tablet,
-    title: 'Check-in kiosk',
-    body: 'The entrance iPad. Tap your name, enter your PIN, and play.',
+    body: 'Open sessions, manage players, confirm payments and set up kiosks.',
   },
 ];
 
@@ -44,7 +38,7 @@ export function Home() {
           </p>
         </div>
 
-        <div className="mt-10 grid gap-4 sm:grid-cols-3">
+        <div className="mt-10 grid gap-4 sm:grid-cols-2">
           {entries.map(({ to, icon: Icon, title, body }) => (
             <Link key={to} to={to} className="group rounded-xl outline-none focus-visible:ring-3 focus-visible:ring-ring/50">
               <Card className="h-full transition group-hover:-translate-y-0.5 group-hover:shadow-md group-hover:ring-foreground/15">

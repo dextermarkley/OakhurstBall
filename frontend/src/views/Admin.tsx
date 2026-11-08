@@ -127,7 +127,7 @@ function AdminInner({ signOut }: { signOut: () => void }) {
               <TabsTrigger value="payments">Payments</TabsTrigger>
               <TabsTrigger value="expenses">Expenses</TabsTrigger>
               <TabsTrigger value="admins">Admins</TabsTrigger>
-              <TabsTrigger value="kiosks">iPads</TabsTrigger>
+              <TabsTrigger value="kiosks">Kiosks</TabsTrigger>
             </TabsList>
           </div>
           <TabsContent value="overview">
@@ -1202,10 +1202,10 @@ function AdminsTab() {
   );
 }
 
-/* ───────────────────────────── iPads ───────────────────────────── */
+/* ───────────────────────────── Kiosks ───────────────────────────── */
 
 const kioskSchema = z.object({
-  deviceId: z.string().trim().regex(/^[a-zA-Z0-9][a-zA-Z0-9_-]{1,63}$/, 'Letters, digits, - or _ (e.g. court-ipad-1)'),
+  deviceId: z.string().trim().regex(/^[a-zA-Z0-9][a-zA-Z0-9_-]{1,63}$/, 'Letters, digits, - or _ (e.g. court-kiosk-1)'),
   label: z.string().trim().max(60),
 });
 
@@ -1231,7 +1231,7 @@ function KiosksTab() {
     const ok = await confirm({
       title: `Remove ${k.label || k.deviceId}?`,
       description: 'It stops working right away and goes back to its pairing screen. You can pair it again later with a new QR code.',
-      confirmLabel: 'Remove iPad',
+      confirmLabel: 'Remove kiosk',
       destructive: true,
     });
     if (!ok) return;
@@ -1268,11 +1268,11 @@ function KiosksTab() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="iPads"
-        description="Pair the entrance iPad by scanning a QR code."
+        title="Kiosks"
+        description="Pair the entrance kiosk by scanning a QR code."
         actions={
           <Button onClick={() => setPairing(true)}>
-            <QrCode /> Pair an iPad
+            <QrCode /> Pair a kiosk
           </Button>
         }
       />
@@ -1286,15 +1286,15 @@ function KiosksTab() {
                 <EmptyMedia variant="icon">
                   <Tablet />
                 </EmptyMedia>
-                <EmptyTitle>No iPads paired</EmptyTitle>
-                <EmptyDescription>Pair the entrance iPad to start checking players in.</EmptyDescription>
+                <EmptyTitle>No kiosks paired</EmptyTitle>
+                <EmptyDescription>Pair the entrance kiosk to start checking players in.</EmptyDescription>
               </EmptyHeader>
             </Empty>
           ) : (
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>iPad</TableHead>
+                  <TableHead>Kiosk</TableHead>
                   <TableHead>Device ID</TableHead>
                   <TableHead className="text-right">Status</TableHead>
                   <TableHead className="w-12">
@@ -1340,9 +1340,9 @@ function KiosksTab() {
           {generated ? (
             <>
               <DialogHeader>
-                <DialogTitle>Scan with the iPad</DialogTitle>
+                <DialogTitle>Scan with the kiosk</DialogTitle>
                 <DialogDescription>
-                  In the kiosk app tap <span className="font-medium text-foreground">Scan pairing QR</span>, or point the iPad's
+                  In the kiosk app tap <span className="font-medium text-foreground">Scan pairing QR</span>, or point the kiosk's
                   Camera app at the code.
                 </DialogDescription>
               </DialogHeader>
@@ -1350,7 +1350,7 @@ function KiosksTab() {
                 <img src={generated.qr} alt="Kiosk pairing QR code" className="size-64 rounded-lg border p-2" />
               </div>
               <p className="text-center text-xs text-muted-foreground">
-                Shown once. Anyone who scans it can act as a kiosk, so close it once the iPad is paired.
+                Shown once. Anyone who scans it can act as a kiosk, so close it once the kiosk is paired.
               </p>
               <details className="mt-2 rounded-lg border p-3 text-sm">
                 <summary className="cursor-pointer text-muted-foreground">Enter the code by hand instead</summary>
@@ -1379,11 +1379,11 @@ function KiosksTab() {
           ) : (
             <form onSubmit={submit} noValidate>
               <DialogHeader>
-                <DialogTitle>Pair an iPad</DialogTitle>
-                <DialogDescription>Reusing an existing device ID replaces its code and un-pairs that iPad.</DialogDescription>
+                <DialogTitle>Pair a kiosk</DialogTitle>
+                <DialogDescription>Reusing an existing device ID replaces its code and un-pairs that kiosk.</DialogDescription>
               </DialogHeader>
               <FieldGroup className="py-5">
-                <FormInput control={form.control} name="deviceId" label="Device ID" placeholder="court-ipad-1" autoComplete="off" />
+                <FormInput control={form.control} name="deviceId" label="Device ID" placeholder="court-kiosk-1" autoComplete="off" />
                 <FormInput control={form.control} name="label" label="Label (optional)" placeholder="Main entrance" autoComplete="off" />
               </FieldGroup>
               <DialogFooter>

@@ -991,25 +991,25 @@ async function apiRouter(
     return ok({ updated: true });
   }
 
-  // GET /api/admin/kiosks — provisioned iPad devices (no secrets)
+  // GET /api/admin/kiosks — provisioned kiosk devices (no secrets)
   if (path === '/api/admin/kiosks' && m === 'GET') {
     return ok({ kiosks: await listKiosks() });
   }
 
   // POST /api/admin/kiosks  { deviceId, label? }
-  // Returns the one-time token to paste into the iPad's /kiosk pairing screen.
+  // Returns the one-time token to paste into the kiosk's /kiosk pairing screen.
   // Re-posting the same deviceId rotates (regenerates) its token.
   if (path === '/api/admin/kiosks' && m === 'POST') {
     const { deviceId, label } = parseBody(event);
     if (!deviceId || !/^[a-zA-Z0-9][a-zA-Z0-9_-]{1,63}$/.test(String(deviceId))) {
-      return badRequest('deviceId: letters, digits, _ or - (2-64 chars), e.g. court-ipad-1');
+      return badRequest('deviceId: letters, digits, _ or - (2-64 chars), e.g. court-kiosk-1');
     }
     const result = await createKiosk(String(deviceId), String(label ?? ''));
     return created(result); // { deviceId, label, token } — token shown once
   }
 
-  // DELETE /api/admin/kiosks/{deviceId} — remove an iPad. Its token stops working
-  // at once, and the iPad goes back to its pairing screen on its next request.
+  // DELETE /api/admin/kiosks/{deviceId} — remove a kiosk. Its token stops working
+  // at once, and the kiosk goes back to its pairing screen on its next request.
   const kioskMatch = path.match(/^\/api\/admin\/kiosks\/([a-zA-Z0-9][a-zA-Z0-9_-]{1,63})$/);
   if (kioskMatch && m === 'DELETE') {
     return ok({ removed: await deleteKiosk(kioskMatch[1]) });

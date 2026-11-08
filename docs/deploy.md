@@ -55,9 +55,9 @@ aws cognito-idp admin-add-user-to-group --region us-west-2 \
 
 Then Admin → Admins: add yourself with your phone (E.164) to receive confirm texts.
 
-## iPad kiosk
+## Kiosk
 
-Admin → **iPad kiosks** → enter a device ID (e.g. `court-ipad-1`) → Generate pairing
+Admin → **Kiosks** → enter a device ID (e.g. `court-kiosk-1`) → Generate pairing
 code. A QR code appears; it encodes `https://oakhurst-ball.org/kiosk#pair=<id>.<token>`
 (credentials in the URL fragment, which is never sent to the server).
 
@@ -67,7 +67,7 @@ code. A QR code appears; it encodes `https://oakhurst-ball.org/kiosk#pair=<id>.<
 - Fallback: "Enter the code by hand" on the kiosk setup screen.
 
 The code is shown once. Generating again for the same device ID rotates the token; the
-old iPad then drops back to the setup screen on its next refresh (within 15 s).
+old kiosk then drops back to the setup screen on its next refresh (within 15 s).
 (`scripts/provision-kiosk.mjs` does the same from the CLI.)
 
 ## Cash confirmation email (SES)
@@ -98,6 +98,6 @@ node scripts/reset-data.mjs --yes    # do it
 
 Deletes every session, check-in, payment, pass and Cognito user. Keeps
 dextermarkley@gmail.com (login, admin group, cash-confirm email, player profile
-and PIN, with the balance reset to $0) and the paired iPads. Options:
-`--keep other@example.com` (repeatable), `--include-kiosks` (un-pair iPads too).
+and PIN, with the balance reset to $0) and the paired kiosks. Options:
+`--keep other@example.com` (repeatable), `--include-kiosks` (un-pair kiosks too).
 Stripe keys, email setup and the domain are untouched.

@@ -9,7 +9,7 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { isInstallSnoozed, promptInstall, setInstallBarVisible, snoozeInstall, useInstall, type InstallKind } from '@/install';
 
-// Pages where the bar would get in the way: the kiosk iPad, the chat (its message
+// Pages where the bar would get in the way: the kiosk, the chat (its message
 // box is at the bottom), and one-off pages people land on from a link.
 const HIDDEN_ON = ['/kiosk', '/chat', '/confirm', '/paid'];
 

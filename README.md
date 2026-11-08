@@ -9,7 +9,7 @@ single fixed cost is the Route 53 hosted zone ($0.50/month).
 ## Architecture
 
 ```
- Browser / iPad ──► oakhurst-ball.org (API Gateway custom domain, regional cert)
+ Browser / kiosk ──► oakhurst-ball.org (API Gateway custom domain, regional cert)
                         │
                         ▼
                  API Gateway HTTP API
@@ -37,7 +37,7 @@ single fixed cost is the Route 53 hosted zone ($0.50/month).
 
 | Role   | Where                      | Auth                                          |
 |--------|----------------------------|-----------------------------------------------|
-| Kiosk  | Shared iPad at the game    | Device token (generated in Admin); name + PIN |
+| Kiosk  | Shared tablet at the game    | Device token (generated in Admin); name + PIN |
 | Player | Member's own phone         | Cognito user                                  |
 | Admin  | Organizers                 | Cognito `admin` group; can view as player     |
 

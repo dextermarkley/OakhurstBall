@@ -1,4 +1,4 @@
-// Entrance iPad (landscape-first, works in portrait).
+// Entrance kiosk (landscape-first, works in portrait).
 //   Gym closed → "not open yet" (an admin opens the session from the Admin page).
 //   Gym open   → who's in + count, then tap name → PIN → check in ($5, once per session)
 //     ├─ covered (pass) or balance ok → "You're in", auto-reset
@@ -83,7 +83,7 @@ export function Kiosk() {
   const [buying, setBuying] = useState<Purchase | null>(null);
   const [inGym, setInGym] = useState(false); // checked in during this flow
 
-  // Unattended iPad: take a new version as soon as nobody is mid-check-in.
+  // Unattended kiosk: take a new version as soon as nobody is mid-check-in.
   const updateReady = useUpdateReady();
   useEffect(() => {
     if (updateReady && (step === 'pick' || step === 'provision')) applyUpdate();
@@ -95,7 +95,7 @@ export function Kiosk() {
   const [now, setNow] = useState(() => new Date());
 
   useEffect(() => {
-    if (justPaired) toast.success('iPad paired');
+    if (justPaired) toast.success('Kiosk paired');
     const t = setInterval(() => setNow(new Date()), 30_000);
     return () => clearInterval(t);
   }, [justPaired]);
@@ -103,7 +103,7 @@ export function Kiosk() {
   // A rejected pairing (token regenerated, device removed) → back to setup.
   const unpair = useCallback((why: string) => {
     clearPairing();
-    setError(`This iPad needs to be paired again (${why}).`);
+    setError(`This kiosk needs to be paired again (${why}).`);
     setStep('provision');
   }, []);
 
@@ -127,7 +127,7 @@ export function Kiosk() {
     savePairing(p);
     setScanning(false);
     setError('');
-    toast.success('iPad paired');
+    toast.success('Kiosk paired');
     setStep('pick');
     return true;
   }, []);
@@ -357,7 +357,7 @@ export function Kiosk() {
     setStep('cash');
   };
 
-  // ── One-time pairing of this iPad ──
+  // ── One-time pairing of this kiosk ──
   if (step === 'provision') {
     return (
       <Screen>
@@ -378,9 +378,9 @@ export function Kiosk() {
                 </Suspense>
               ) : (
                 <>
-                  <h1 className="text-xl font-semibold tracking-tight">Pair this iPad</h1>
+                  <h1 className="text-xl font-semibold tracking-tight">Pair this kiosk</h1>
                   <p className="mt-2 text-sm text-muted-foreground">
-                    On another device, open <span className="font-medium text-foreground">Admin → iPads → Pair an iPad</span>, then
+                    On another device, open <span className="font-medium text-foreground">Admin → Kiosks → Pair a kiosk</span>, then
                     scan the QR code it shows.
                   </p>
                   <Button size="lg" className="mt-6 h-12 w-full text-base" onClick={() => { setError(''); setScanning(true); }}>
@@ -715,7 +715,7 @@ export function Kiosk() {
               </p>
               <div>
                 <Button variant="link" className="mt-4" render={<a href={card.url} />}>
-                  <QrCode /> Pay on this iPad instead
+                  <QrCode /> Pay on this kiosk instead
                 </Button>
               </div>
             </Centered>
@@ -832,7 +832,7 @@ function ManualPair({ onPaired }: { onPaired: () => void }) {
     <details className="mt-6 rounded-xl border p-4">
       <summary className="cursor-pointer text-sm text-muted-foreground">Enter the code by hand instead</summary>
       <div className="mt-4 space-y-3">
-        <Input placeholder="Device ID, e.g. court-ipad-1" value={deviceId} onChange={(e) => setDeviceId(e.target.value)} aria-label="Device ID" />
+        <Input placeholder="Device ID, e.g. court-kiosk-1" value={deviceId} onChange={(e) => setDeviceId(e.target.value)} aria-label="Device ID" />
         <Input placeholder="Token" value={token} onChange={(e) => setToken(e.target.value)} aria-label="Token" />
         <Button
           variant="outline"

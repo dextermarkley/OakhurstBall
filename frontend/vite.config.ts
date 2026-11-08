@@ -43,10 +43,8 @@ export default defineConfig({
           { src: '/pwa-512.png', sizes: '512x512', type: 'image/png' },
           { src: '/pwa-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
         ],
-        shortcuts: [
-          { name: 'Check-in kiosk', url: '/kiosk', icons: [{ src: '/pwa-192.png', sizes: '192x192' }] },
-          { name: 'My account', url: '/player', icons: [{ src: '/pwa-192.png', sizes: '192x192' }] },
-        ],
+        // The kiosk is reached by pairing (Admin → Kiosks), not from here.
+        shortcuts: [{ name: 'My account', url: '/player', icons: [{ src: '/pwa-192.png', sizes: '192x192' }] }],
       },
       workbox: {
         // App shell is precached; anything live (API, runtime config, Stripe/auth
