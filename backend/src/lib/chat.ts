@@ -150,7 +150,9 @@ export async function changesSince(after: string, sinceIso: string) {
     query('SK BETWEEN :lo AND :hi', { ':lo': `DEL#${sinceIso}`, ':hi': 'DEL#\uffff' }, true, 200),
     query('SK BETWEEN :lo AND :hi', { ':lo': `UPD#${sinceIso}`, ':hi': 'UPD#\uffff' }, false, 200),
   ]);
-  const freshSKs = new Set(fresh.map((i) => i.SK));
+  // `after` is the client's newest message (BETWEEN includes it): it is not new.
+  const newOnes = fresh.filter((i) => i.SK !== after);
+  const freshSKs = new Set(newOnes.map((i) => i.SK));
   // Changed messages the client already has (new ones arrive whole in `messages`).
   const changed = [...new Set(upds.map((u) => u.msgSK as string))].filter((sk) => !freshSKs.has(sk)).slice(0, 100);
   const updated: ChatMessage[] = [];
@@ -163,7 +165,7 @@ export async function changesSince(after: string, sinceIso: string) {
     }
   }
   return {
-    messages: fresh.filter((i) => i.SK !== after).map(view),
+    messages: newOnes.map(view),
     deleted: dels.map((d) => d.messageId as string),
     updated,
   };
