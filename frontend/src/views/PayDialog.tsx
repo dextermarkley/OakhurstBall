@@ -3,7 +3,7 @@
 //   • any time from "Pay now" (no ask)
 // Card goes to Stripe Checkout; cash asks which admin gets the money, and that
 // admin confirms by email (or on the Admin page), same as the kiosk.
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { ArrowLeft, Banknote, CreditCard, Mail, Ticket } from 'lucide-react';
 import { api, type CheckinResult, type MySession, type Plan } from '@/api';
@@ -35,6 +35,8 @@ export function PayDialog({
   const [cashFor, setCashFor] = useState<Purchase | null>(null);
   const [sent, setSent] = useState<{ adminName: string; cents: number; emailed: boolean; label: string } | null>(null);
   const [admins, setAdmins] = useState<Admin[] | null>(null);
+  const openRef = useRef(open);
+  openRef.current = open;
 
   useEffect(() => {
     if (!open) {
@@ -63,12 +65,33 @@ export function PayDialog({
     setBusy(true);
     try {
       await checkInFirst();
-      window.location.assign((await api.myPayCard(p.plan)).checkoutUrl);
+      const { checkoutUrl } = await api.myPayCard(p.plan);
+      // Closed while waiting = changed their mind: don't whisk them off to Stripe.
+      // (The unused checkout expires on its own; nothing is charged.)
+      if (!openRef.current) return;
+      window.location.assign(checkoutUrl);
+      // If the browser hasn't left for Stripe after a while (blocked, slow, or
+      // the player stayed), don't leave the options greyed out.
+      setTimeout(() => setBusy(false), 15_000);
     } catch (e: any) {
       toast.error(e.message);
       setBusy(false);
     }
   }
+
+  // Coming back from Stripe with the Back button (e.g. after a declined card)
+  // restores this page exactly as it was left: still "busy", options greyed
+  // out. Clear that and refresh the balance, since a payment may have gone through.
+  useEffect(() => {
+    const onShow = (e: PageTransitionEvent) => {
+      if (e.persisted) {
+        setBusy(false);
+        onChanged();
+      }
+    };
+    window.addEventListener('pageshow', onShow);
+    return () => window.removeEventListener('pageshow', onShow);
+  }, [onChanged]);
 
   async function payCash(admin: Admin) {
     if (!cashFor) return;
@@ -76,7 +99,9 @@ export function PayDialog({
     try {
       await checkInFirst();
       const r = await api.myPayCash(admin.adminId, cashFor.plan);
-      setSent({ adminName: r.adminName, cents: r.amountCents, emailed: r.emailed, label: cashFor.label });
+      // Closed while waiting? Say it in a toast rather than reopening to a stale screen.
+      if (openRef.current) setSent({ adminName: r.adminName, cents: r.amountCents, emailed: r.emailed, label: cashFor.label });
+      else toast.success(`Hand ${money(r.amountCents)} to ${r.adminName}. Your balance updates when they confirm.`);
       onChanged();
     } catch (e: any) {
       toast.error(e.message);
@@ -108,7 +133,7 @@ export function PayDialog({
       : `Your balance is ${balanceText(s.balanceCents)}.`;
 
   return (
-    <Dialog open={open} onOpenChange={(o) => !o && !busy && onClose()}>
+    <Dialog open={open} onOpenChange={(o) => !o && onClose() /* always closable: never trap someone in here */}>
       <DialogContent className="sm:max-w-md">
         {sent ? (
           <>
