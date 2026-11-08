@@ -40,6 +40,7 @@ import { cn } from '@/lib/utils';
 import { clearPairing, parsePairing, savePairing } from '@/pairing';
 import { APP_VERSION, applyUpdate, useUpdateReady } from '@/pwa';
 import { SignScreen } from './Agreements';
+import { CashAmountPicker } from '@/components/cash-amount';
 
 // Loaded only when the Scan button is tapped (keeps jsQR out of the main bundle).
 const QrScanner = lazy(() => import('./QrScanner').then((m) => ({ default: m.QrScanner })));
@@ -346,7 +347,7 @@ export function Kiosk() {
     setBusy(true);
     try {
       await checkInIfAllowed();
-      const r = await kiosk.payCash(selected.playerId, pin, admin.adminId, buying?.plan);
+      const r = await kiosk.payCash(selected.playerId, pin, admin.adminId, buying?.plan, buying?.amountCents);
       setCash({ paymentId: r.paymentId, adminName: r.adminName, emailed: r.emailed });
       setStep('cashwait');
     } catch (e: any) {
@@ -456,7 +457,7 @@ export function Kiosk() {
           disabled={busy || admins.length === 0}
           onClick={() => chooseCash({ amountCents: opts.cashCents, what: `${money(opts.cashCents)} account credit` })}
         >
-          <Banknote /> {money(opts.cashCents)} cash
+          <Banknote /> Cash ({money(opts.cashCents)}+)
         </Button>
       </ChoiceRow>
       {opts.plans
@@ -694,7 +695,19 @@ export function Kiosk() {
             <Centered wide>
               <BackButton onClick={() => setStep(backStep)} />
               <h1 className="text-2xl font-semibold tracking-tight">Who are you giving {money(buying.amountCents)} to?</h1>
-              <p className="mt-2 text-muted-foreground">{buying.what}</p>
+              <p className="mt-2 text-muted-foreground">
+                {buying.plan ? buying.what : 'Account credit. Paying more? Change the amount in $5 steps.'}
+              </p>
+              {!buying.plan && (
+                <div className="mt-6 rounded-2xl border bg-card py-5">
+                  <CashAmountPicker
+                    size="lg"
+                    value={buying.amountCents}
+                    disabled={busy}
+                    onChange={(c) => setBuying({ ...buying, amountCents: c, what: `${money(c)} account credit` })}
+                  />
+                </div>
+              )}
               <div className="mt-8 grid gap-3 sm:grid-cols-2">
                 {admins.map((a) => (
                   <button

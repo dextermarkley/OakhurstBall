@@ -260,8 +260,10 @@ export async function createCashPayment(input: {
   adminId: string;
   adminEmail?: string;
   plan?: Plan;
+  /** Credit amount (ignored for passes, which have a fixed price). */
+  creditCents?: number;
 }): Promise<{ payment: Payment; emailed: boolean }> {
-  const purchase = purchaseFor(input.plan, AMOUNTS.cash);
+  const purchase = purchaseFor(input.plan, input.creditCents ?? AMOUNTS.cash);
   const amountCents = purchase.amountCents;
   const { payment, token } = await writePending({
     paymentId: newId(),

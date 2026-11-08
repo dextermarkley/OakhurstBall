@@ -11,6 +11,7 @@ import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Spinner } from '@/components/ui/spinner';
+import { CashAmountPicker } from '@/components/cash-amount';
 import { balanceText, initials, money, planName } from '@/lib/format';
 
 type Purchase = { plan?: Plan; cents: number; label: string };
@@ -33,6 +34,13 @@ export function PayDialog({
 }) {
   const [busy, setBusy] = useState(false);
   const [cashFor, setCashFor] = useState<Purchase | null>(null);
+  // Cash credit can be more than $5 (in $5 steps); passes have a fixed price.
+  const [cashCents, setCashCents] = useState(500);
+  const chooseCash = (p: Purchase) => {
+    setCashCents(p.cents);
+    setCashFor(p);
+  };
+  const cashTotal = cashFor ? (cashFor.plan ? cashFor.cents : cashCents) : 0;
   const [sent, setSent] = useState<{ adminName: string; cents: number; emailed: boolean; label: string } | null>(null);
   const [admins, setAdmins] = useState<Admin[] | null>(null);
   const openRef = useRef(open);
@@ -98,9 +106,10 @@ export function PayDialog({
     setBusy(true);
     try {
       await checkInFirst();
-      const r = await api.myPayCash(admin.adminId, cashFor.plan);
+      const r = await api.myPayCash(admin.adminId, cashFor.plan, cashFor.plan ? undefined : cashCents);
+      const label = cashFor.plan ? cashFor.label : `${money(r.amountCents)} account credit`;
       // Closed while waiting? Say it in a toast rather than reopening to a stale screen.
-      if (openRef.current) setSent({ adminName: r.adminName, cents: r.amountCents, emailed: r.emailed, label: cashFor.label });
+      if (openRef.current) setSent({ adminName: r.adminName, cents: r.amountCents, emailed: r.emailed, label });
       else toast.success(`Hand ${money(r.amountCents)} to ${r.adminName}. Your balance updates when they confirm.`);
       onChanged();
     } catch (e: any) {
@@ -161,9 +170,16 @@ export function PayDialog({
         ) : cashFor ? (
           <>
             <DialogHeader>
-              <DialogTitle>Who are you giving {money(cashFor.cents)} to?</DialogTitle>
-              <DialogDescription>{cashFor.label}</DialogDescription>
+              <DialogTitle>Who are you giving {money(cashTotal)} to?</DialogTitle>
+              <DialogDescription>
+                {cashFor.plan ? cashFor.label : 'Account credit. Paying more? Change the amount in $5 steps.'}
+              </DialogDescription>
             </DialogHeader>
+            {!cashFor.plan && (
+              <div className="rounded-lg border bg-muted/30 py-4">
+                <CashAmountPicker value={cashCents} onChange={setCashCents} disabled={busy} />
+              </div>
+            )}
             <div className="grid gap-2 py-2">
               {admins === null && <Spinner className="mx-auto" />}
               {admins?.length === 0 && <p className="text-sm text-muted-foreground">No admins can take cash right now.</p>}
@@ -198,8 +214,8 @@ export function PayDialog({
                 <Button size="sm" disabled={busy || !s.options.cardEnabled} onClick={() => payCard(creditCard)}>
                   <CreditCard /> {money(creditCard.cents)}
                 </Button>
-                <Button size="sm" variant="outline" disabled={busy} onClick={() => setCashFor(creditCash)}>
-                  <Banknote /> {money(creditCash.cents)} cash
+                <Button size="sm" variant="outline" disabled={busy} onClick={() => chooseCash(creditCash)}>
+                  <Banknote /> Cash ({money(creditCash.cents)}+)
                 </Button>
               </Option>
               {passes.map((p) => (
@@ -207,7 +223,7 @@ export function PayDialog({
                   <Button size="sm" disabled={busy || !s.options.cardEnabled} onClick={() => payCard(p)}>
                     <CreditCard /> Card
                   </Button>
-                  <Button size="sm" variant="outline" disabled={busy} onClick={() => setCashFor(p)}>
+                  <Button size="sm" variant="outline" disabled={busy} onClick={() => chooseCash(p)}>
                     <Banknote /> Cash
                   </Button>
                 </Option>

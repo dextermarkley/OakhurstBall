@@ -88,11 +88,25 @@ try {
   check('admin confirms', r.status === 200, r);
   check('balance credited to $0', (await balance()) === 0, await balance());
 
+  // ── Paying more than $5 cash, in $5 steps ──
+  r = await api('POST', '/me/pay-cash', { adminId: cashAdminId, amountCents: 750 });
+  check('cash $7.50 rejected (not a $5 step)', r.status === 400, r);
+  r = await api('POST', '/me/pay-cash', { adminId: cashAdminId, amountCents: 25000 });
+  check('cash over $200 rejected', r.status === 400, r);
+  r = await api('POST', '/me/pay-cash', { adminId: cashAdminId, amountCents: 2000 });
+  check('cash $20 → $20 pending', r.status === 201 && r.body.amountCents === 2000, r);
+  r = await api('POST', `/admin/payments/${r.body?.paymentId}/confirm`);
+  check('confirmed $20 credits $20 (balance $20)', r.status === 200 && (await balance()) === 2000, await balance());
+
+  r = await api('POST', '/me/pay-cash', { adminId: cashAdminId, plan: 'quarter', amountCents: 500 });
+  check('a pass keeps its price even if an amount is sent', r.status === 201 && r.body.amountCents === 8000, r);
+  await api('POST', `/admin/payments/${r.body?.paymentId}/deny`);
+
   r = await api('POST', '/me/pay-cash', { adminId: cashAdminId, plan: 'quarter' });
   check('pay-cash quarter pass → $80 pending', r.status === 201 && r.body.amountCents === 8000, r);
   r = await api('POST', `/admin/payments/${r.body?.paymentId}/deny`);
   check('admin denies the quarter cash', r.status === 200, r);
-  check('balance still $0 after deny', (await balance()) === 0, await balance());
+  check('balance still $20 after deny', (await balance()) === 2000, await balance());
 } catch (err) {
   console.error(err);
   failures++;

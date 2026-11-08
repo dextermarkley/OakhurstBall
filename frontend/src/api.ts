@@ -318,11 +318,12 @@ export const api = {
   async myAdmins() {
     return req<{ admins: Array<{ adminId: string; name: string }> }>('/api/me/admins', { headers: await authHeaders() });
   },
-  async myPayCash(adminId: string, plan?: Plan) {
+  /** amountCents: cash credit in $5 steps (ignored for passes). */
+  async myPayCash(adminId: string, plan?: Plan, amountCents?: number) {
     return req<{ paymentId: string; amountCents: number; adminName: string; emailed: boolean }>('/api/me/pay-cash', {
       method: 'POST',
       headers: await authHeaders(),
-      body: JSON.stringify({ adminId, plan }),
+      body: JSON.stringify({ adminId, plan, amountCents: plan ? undefined : amountCents }),
     });
   },
   async grantPass(playerId: string, plan: Plan) {
@@ -530,10 +531,10 @@ export const kiosk = {
       kioskHeaders(),
     );
   },
-  async payCash(playerId: string, pin: string, adminId: string, plan?: Plan) {
+  async payCash(playerId: string, pin: string, adminId: string, plan?: Plan, amountCents?: number) {
     return req<{ paymentId: string; amountCents: number; adminName: string; emailed: boolean }>(
       '/api/kiosk/pay',
-      { method: 'POST', body: JSON.stringify({ playerId, pin, method: 'cash', adminId, plan }) },
+      { method: 'POST', body: JSON.stringify({ playerId, pin, method: 'cash', adminId, plan, amountCents: plan ? undefined : amountCents }) },
       kioskHeaders(),
     );
   },

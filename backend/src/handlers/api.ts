@@ -84,6 +84,7 @@ import {
   toUser,
   vapidPublicKey,
 } from '../lib/push.js';
+import { cashCreditCents } from '../lib/cash.js';
 import { addExpense, checkExpense, deleteExpense, expenseReport, updateExpense } from '../lib/expenses.js';
 import { RULES, WAIVER, checkSignature, isCurrent, recordAgreements } from '../lib/agreements.js';
 import {
@@ -341,7 +342,7 @@ async function kioskRouter(
   // plan 'quarter' | 'year' buys a pass; no plan buys drop-in credit.
   // Amounts are fixed server-side; the kiosk never sends one.
   if (path === '/kiosk/pay' && m === 'POST') {
-    const { playerId, pin, method: pm, adminId, plan: rawPlan } = parseBody(event);
+    const { playerId, pin, method: pm, adminId, plan: rawPlan, amountCents: rawAmount } = parseBody(event);
     if (!playerId || !pin) return badRequest('playerId and pin required');
     if (pm !== 'card' && pm !== 'cash') return badRequest("method must be 'card' or 'cash'");
     if (rawPlan != null && !isPlan(rawPlan)) return badRequest("plan must be 'quarter' or 'year'");
@@ -367,6 +368,8 @@ async function kioskRouter(
     }
 
     if (!adminId) return badRequest('adminId required for cash');
+    const credit = plan ? AMOUNTS.cash : cashCreditCents(rawAmount, AMOUNTS.cash);
+    if (typeof credit === 'string') return badRequest(credit);
     const admin = await getAdmin(adminId);
     if (!admin || !admin.active) return notFound('admin');
     const { payment, emailed } = await createCashPayment({
@@ -375,6 +378,7 @@ async function kioskRouter(
       adminId,
       adminEmail: admin.email,
       plan,
+      creditCents: credit,
     });
     return created({
       paymentId: payment.paymentId,
@@ -647,10 +651,12 @@ async function apiRouter(
   if (path === '/api/me/pay-cash' && m === 'POST') {
     const player = await getPlayerByCognitoSub(claims.sub);
     if (!player) return notFound('no linked player profile');
-    const { adminId, plan: rawPlan } = parseBody(event);
+    const { adminId, plan: rawPlan, amountCents: rawAmount } = parseBody(event);
     if (rawPlan != null && !isPlan(rawPlan)) return badRequest("plan must be 'quarter' or 'year'");
     const plan = (rawPlan ?? undefined) as Plan | undefined;
     if (!adminId) return badRequest('adminId required');
+    const credit = plan ? AMOUNTS.cash : cashCreditCents(rawAmount, AMOUNTS.cash);
+    if (typeof credit === 'string') return badRequest(credit);
     const adm = await getAdmin(String(adminId));
     if (!adm || !adm.active) return notFound('admin');
     if (plan) {
@@ -663,6 +669,7 @@ async function apiRouter(
       adminId: adm.adminId,
       adminEmail: adm.email,
       plan,
+      creditCents: credit,
     });
     return created({ paymentId: payment.paymentId, amountCents: payment.amountCents, adminName: adm.name, emailed });
   }

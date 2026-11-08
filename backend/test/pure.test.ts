@@ -187,3 +187,20 @@ test('agreements are current only for the latest versions of both', () => {
   assert.equal(isCurrent({ waiverVersion: WAIVER.version, rulesVersion: 'old' }), false);
   assert.equal(isCurrent(null), false);
 });
+
+// ── Cash credit amounts: $5 steps, $5 – $200 ──
+import { cashCreditCents } from '../src/lib/cash.js';
+
+test('cash credit: $5 steps are accepted, missing means $5', () => {
+  assert.equal(cashCreditCents(undefined), 500);
+  assert.equal(cashCreditCents(500), 500);
+  assert.equal(cashCreditCents(1000), 1000);
+  assert.equal(cashCreditCents(2000), 2000);
+  assert.equal(cashCreditCents(20000), 20000);
+});
+
+test('cash credit: anything else is rejected', () => {
+  for (const bad of [0, 250, 750, -500, 20500, 12.5, 'ten', '1000x']) {
+    assert.equal(typeof cashCreditCents(bad), 'string', String(bad));
+  }
+});
