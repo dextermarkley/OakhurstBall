@@ -8,11 +8,9 @@ import {
   CognitoIdentityProviderClient, AdminCreateUserCommand, AdminSetUserPasswordCommand,
   AdminAddUserToGroupCommand, AdminDeleteUserCommand, InitiateAuthCommand,
 } from '@aws-sdk/client-cognito-identity-provider';
+import { BASE, TABLE, POOL, CLIENT } from './env.mjs';
 
 const REGION = process.env.AWS_REGION ?? 'us-west-2';
-const BASE = 'https://www.oakhurst-ball.org';
-const POOL = 'us-west-2_sgaAJES20';
-const CLIENT = '2fm9q7bir02ib5upgeeelivdii';
 const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({ region: REGION }));
 const cognito = new CognitoIdentityProviderClient({ region: REGION });
 const hex = (n) => randomBytes(n).toString('hex');
@@ -41,7 +39,7 @@ async function login(label, { admin = false, player = true } = {}) {
     playerId = hex(12);
     players.push(playerId);
     const now = new Date().toISOString();
-    await ddb.send(new PutCommand({ TableName: 'oakhurst', Item: {
+    await ddb.send(new PutCommand({ TableName: TABLE, Item: {
       PK: `PLAYER#${playerId}`, SK: 'PROFILE', playerId, name: `ZZ Waiver ${label}`, balanceCents: 0, active: true,
       createdAt: now, updatedAt: now, GSI1PK: 'PLAYER', GSI1SK: `zz waiver ${label}`, cognitoSub: sub, email,
     } }));
@@ -59,7 +57,7 @@ async function login(label, { admin = false, player = true } = {}) {
   return { call, playerId };
 }
 const records = async (pid) =>
-  (await ddb.send(new QueryCommand({ TableName: 'oakhurst', KeyConditionExpression: 'PK = :pk AND begins_with(SK, :s)',
+  (await ddb.send(new QueryCommand({ TableName: TABLE, KeyConditionExpression: 'PK = :pk AND begins_with(SK, :s)',
     ExpressionAttributeValues: { ':pk': `PLAYER#${pid}`, ':s': 'AGREEMENT#' } }))).Items ?? [];
 
 try {
@@ -107,8 +105,8 @@ try {
   failures++;
 } finally {
   for (const pid of players) {
-    const items = await ddb.send(new QueryCommand({ TableName: 'oakhurst', KeyConditionExpression: 'PK = :pk', ExpressionAttributeValues: { ':pk': `PLAYER#${pid}` } }));
-    for (const it of items.Items ?? []) await ddb.send(new DeleteCommand({ TableName: 'oakhurst', Key: { PK: it.PK, SK: it.SK } }));
+    const items = await ddb.send(new QueryCommand({ TableName: TABLE, KeyConditionExpression: 'PK = :pk', ExpressionAttributeValues: { ':pk': `PLAYER#${pid}` } }));
+    for (const it of items.Items ?? []) await ddb.send(new DeleteCommand({ TableName: TABLE, Key: { PK: it.PK, SK: it.SK } }));
   }
   for (const u of users) await cognito.send(new AdminDeleteUserCommand({ UserPoolId: POOL, Username: u })).catch(() => {});
   console.log(`cleanup: ${players.length} players, ${users.length} users`);

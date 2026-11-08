@@ -16,12 +16,9 @@ import {
   CognitoIdentityProviderClient, AdminCreateUserCommand, AdminSetUserPasswordCommand,
   AdminAddUserToGroupCommand, AdminDeleteUserCommand, InitiateAuthCommand,
 } from '@aws-sdk/client-cognito-identity-provider';
+import { BASE, TABLE, POOL, CLIENT, FN_PREFIX } from './env.mjs';
 
 const REGION = process.env.AWS_REGION ?? 'us-west-2';
-const BASE = 'https://www.oakhurst-ball.org';
-const TABLE = 'oakhurst';
-const POOL = 'us-west-2_sgaAJES20';
-const CLIENT = '2fm9q7bir02ib5upgeeelivdii';
 const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({ region: REGION }));
 const cognito = new CognitoIdentityProviderClient({ region: REGION });
 const lambda = new LambdaClient({ region: REGION });
@@ -127,7 +124,7 @@ try {
   const signupEmail = `agent-appr-new-${hex(3)}@oakhurst-ball.org`;
   const t0 = Date.now();
   const inv = await lambda.send(new InvokeCommand({
-    FunctionName: 'oakhurst-postauth',
+    FunctionName: `${FN_PREFIX}-postauth`,
     Payload: Buffer.from(JSON.stringify({
       version: '1', region: REGION, userPoolId: POOL, userName: signupSub, triggerSource: 'PostConfirmation_ConfirmSignUp',
       callerContext: { awsSdkVersion: 'test', clientId: CLIENT },

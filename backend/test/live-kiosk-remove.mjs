@@ -8,11 +8,9 @@ import {
   CognitoIdentityProviderClient, AdminCreateUserCommand, AdminSetUserPasswordCommand,
   AdminAddUserToGroupCommand, AdminDeleteUserCommand, InitiateAuthCommand,
 } from '@aws-sdk/client-cognito-identity-provider';
+import { BASE, TABLE, POOL, CLIENT } from './env.mjs';
 
 const REGION = process.env.AWS_REGION ?? 'us-west-2';
-const BASE = 'https://www.oakhurst-ball.org';
-const POOL = 'us-west-2_sgaAJES20';
-const CLIENT = '2fm9q7bir02ib5upgeeelivdii';
 const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({ region: REGION }));
 const cognito = new CognitoIdentityProviderClient({ region: REGION });
 const hex = (n) => randomBytes(n).toString('hex');
@@ -53,7 +51,7 @@ try {
 
   // ── Only admins can add a kiosk ──
   const sneaky = `agent-sneaky-${hex(3)}`;
-  const exists = async (id) => !!(await ddb.send(new GetCommand({ TableName: 'oakhurst', Key: { PK: `KIOSK#${id}`, SK: 'PROFILE' } }))).Item;
+  const exists = async (id) => !!(await ddb.send(new GetCommand({ TableName: TABLE, Key: { PK: `KIOSK#${id}`, SK: 'PROFILE' } }))).Item;
   let r = await call('POST', '/api/admin/kiosks', P, { deviceId: sneaky });
   check('a signed-in player cannot add a kiosk (403)', r.status === 403 && !(await exists(sneaky)), r);
   r = await call('POST', '/api/admin/kiosks', { 'content-type': 'application/json' }, { deviceId: sneaky });
@@ -91,8 +89,8 @@ try {
   console.error(err);
   failures++;
 } finally {
-  const left = await ddb.send(new GetCommand({ TableName: 'oakhurst', Key: { PK: `KIOSK#${deviceId}`, SK: 'PROFILE' } }));
-  if (left.Item) await ddb.send(new DeleteCommand({ TableName: 'oakhurst', Key: { PK: `KIOSK#${deviceId}`, SK: 'PROFILE' } }));
+  const left = await ddb.send(new GetCommand({ TableName: TABLE, Key: { PK: `KIOSK#${deviceId}`, SK: 'PROFILE' } }));
+  if (left.Item) await ddb.send(new DeleteCommand({ TableName: TABLE, Key: { PK: `KIOSK#${deviceId}`, SK: 'PROFILE' } }));
   for (const u of users) await cognito.send(new AdminDeleteUserCommand({ UserPoolId: POOL, Username: u })).catch(() => {});
   console.log(`cleanup: ${users.length} users${left.Item ? ', leftover kiosk' : ''}`);
   console.log(failures ? `${failures} FAILED` : 'ALL PASSED');

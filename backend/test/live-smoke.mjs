@@ -5,9 +5,8 @@
 import { randomBytes, scryptSync } from 'node:crypto';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, PutCommand, DeleteCommand, QueryCommand } from '@aws-sdk/lib-dynamodb';
+import { BASE, TABLE } from './env.mjs';
 
-const BASE = process.argv[2] ?? 'https://www.oakhurst-ball.org';
-const TABLE = 'oakhurst';
 // Fixture players have signed the current waiver + rules (see src/lib/agreements.ts).
 const SIGNED = { waiverVersion: '2026-11-07', rulesVersion: '2026-11-07.2', agreedAt: '2026-11-07T00:00:00.000Z', signedName: 'ZZ Test' };
 const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({ region: process.env.AWS_REGION ?? 'us-west-2' }));

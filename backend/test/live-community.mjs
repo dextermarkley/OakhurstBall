@@ -13,13 +13,9 @@ import {
   CognitoIdentityProviderClient, AdminCreateUserCommand, AdminSetUserPasswordCommand,
   AdminAddUserToGroupCommand, AdminDeleteUserCommand, InitiateAuthCommand,
 } from '@aws-sdk/client-cognito-identity-provider';
+import { BASE, TABLE, POOL, CLIENT, BUCKET } from './env.mjs';
 
 const REGION = process.env.AWS_REGION ?? 'us-west-2';
-const BASE = 'https://www.oakhurst-ball.org';
-const TABLE = 'oakhurst';
-const POOL = 'us-west-2_sgaAJES20';
-const CLIENT = '2fm9q7bir02ib5upgeeelivdii';
-const BUCKET = process.env.CHAT_BUCKET ?? 'oakhurstbasketball-chatmedia5bcb02ee-j1khrlkzs6w1';
 const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({ region: REGION }), { marshallOptions: { removeUndefinedValues: true } });
 const cognito = new CognitoIdentityProviderClient({ region: REGION });
 const s3 = new S3Client({ region: REGION });

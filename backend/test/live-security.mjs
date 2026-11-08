@@ -6,11 +6,8 @@ import { createHash, randomBytes, scryptSync } from 'node:crypto';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, PutCommand, DeleteCommand, QueryCommand, GetCommand } from '@aws-sdk/lib-dynamodb';
 import * as C from '@aws-sdk/client-cognito-identity-provider';
+import { BASE, TABLE, POOL, CLIENT } from './env.mjs';
 
-const BASE = 'https://oakhurst-ball.org';
-const TABLE = 'oakhurst';
-const POOL = 'us-west-2_sgaAJES20';
-const CLIENT = '2fm9q7bir02ib5upgeeelivdii';
 const SIGNED = { waiverVersion: '2026-11-07', rulesVersion: '2026-11-07.2', agreedAt: '2026-11-07T00:00:00.000Z', signedName: 'ZZ Test' };
 const region = process.env.AWS_REGION ?? 'us-west-2';
 const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({ region }));

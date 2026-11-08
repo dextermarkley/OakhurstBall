@@ -10,12 +10,9 @@ import {
   CognitoIdentityProviderClient, AdminCreateUserCommand, AdminSetUserPasswordCommand,
   AdminDeleteUserCommand, InitiateAuthCommand,
 } from '@aws-sdk/client-cognito-identity-provider';
+import { BASE, TABLE, POOL, CLIENT, PARAM_PREFIX } from './env.mjs';
 
 const REGION = process.env.AWS_REGION ?? 'us-west-2';
-const BASE = 'https://www.oakhurst-ball.org';
-const TABLE = 'oakhurst';
-const POOL = 'us-west-2_sgaAJES20';
-const CLIENT = '2fm9q7bir02ib5upgeeelivdii';
 const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({ region: REGION }));
 const cognito = new CognitoIdentityProviderClient({ region: REGION });
 const ssm = new SSMClient({ region: REGION });
@@ -62,7 +59,7 @@ try {
   const b = await makeUser('b');
 
   let r = await a('GET', '/me/push');
-  const ssmKey = (await ssm.send(new GetParameterCommand({ Name: '/oakhurst/push/vapid-public' }))).Parameter.Value;
+  const ssmKey = (await ssm.send(new GetParameterCommand({ Name: `${PARAM_PREFIX}/push/vapid-public` }))).Parameter.Value;
   check('GET /me/push returns the VAPID public key', r.status === 200 && r.body.publicKey === ssmKey, r);
 
   r = await a('POST', '/me/push', { subscription: { ...subscription, endpoint: 'https://evil.example.com/x' } });

@@ -1,22 +1,47 @@
 # Deploy guide
 
-One stack (`OakhurstBasketball`), one region: account `124705683281`, `us-west-2`.
-No CloudFront. One private S3 bucket (chat images). Nothing in us-east-1.
+Two stacks, one account and region (`124705683281`, `us-west-2`):
 
-## Deploy
+| Stack                     | Site                              | Purpose                              |
+|---------------------------|-----------------------------------|--------------------------------------|
+| `OakhurstBasketballAlpha` | https://alpha.oakhurst-ball.org   | every change is tested here first    |
+| `OakhurstBasketball`      | https://oakhurst-ball.org (+ www) | the real club                        |
+
+Alpha is a full separate copy: its own table (`oakhurst-alpha`), Cognito users,
+chat bucket, Lambdas (`oakhurst-alpha-*`), SSM parameters (`/oakhurst-alpha/...`:
+its own VAPID keys, the Stripe **test** key, its own Stripe webhook endpoint). It
+shares only the Route 53 zone. Its data is test data, and the app shows an
+"ALPHA · TEST DATA" badge. Alpha resources are disposable (no deletion
+protection, no backups); prod keeps all of those.
+
+## Workflow: alpha first, prod only with Dexter's approval
 
 ```bash
-cd frontend && npm install && npm run build     # SPA is bundled into the web Lambda
-cd ../infra && npm install
-export CDK_DEFAULT_ACCOUNT=124705683281 CDK_DEFAULT_REGION=us-west-2
-npx cdk deploy
+scripts/deploy-alpha.sh          # build + deploy the working tree to alpha
+cd backend && AWS_REGION=us-west-2 node test/live-<name>.mjs   # live tests hit alpha by default
+# ... Dexter tries it on alpha.oakhurst-ball.org and approves commit <sha> ...
+scripts/promote.sh --approved-by-dexter <sha>
 ```
 
-The stack refuses to synth if `frontend/dist/index.html` is missing, so always build
-the frontend first. There is no config step: the web Lambda serves `/config.js` from
-its own environment (Cognito IDs, same-origin API).
+- `deploy-alpha.sh` records the commit as the alpha stack's `GitSha` output
+  (`<sha>-dirty` with uncommitted changes) and pushes clean commits to the
+  `alpha` branch.
+- `promote.sh` refuses unless HEAD is that approved commit, the tree is clean,
+  and alpha already runs the same commit. It then deploys prod, checks the live
+  site serves the new build, and pushes the commit to `publish-main` (which
+  therefore always matches prod).
+- The prod stack is only part of the CDK app when `OAKHURST_PROD=1`, which only
+  `promote.sh` sets, so `cdk deploy` on its own can only ever reach alpha.
+- Live tests choose the stack with `OAKHURST_ENV=alpha` (default) or `prod`
+  (`backend/test/env.mjs`).
+- Admins on a stage: `node scripts/add-admin.mjs <alpha|prod> <email> "<Name>"`
+  (invites by email if they have no account, adds the admin group, the player
+  profile and the cash-recipient record).
 
-First-time only: `npx cdk bootstrap aws://124705683281/us-west-2` (already done).
+The stack refuses to synth if `frontend/dist/index.html` is missing; both scripts
+build the frontend first. The web Lambda serves `/config.js` from its own
+environment (Cognito IDs, stage). First-time only:
+`npx cdk bootstrap aws://124705683281/us-west-2` (done).
 
 ## Custom domain
 
@@ -33,7 +58,7 @@ The registrar (Hover) must delegate to the zone's four `awsdns` nameservers
 dig +norecurse NS oakhurst-ball.org @a2.org.afilias-nst.info
 ```
 
-Run without a domain: `DOMAIN= npx cdk deploy` (site on the execute-api URL).
+Alpha adds `alpha.oakhurst-ball.org` (its own cert and A/AAAA records) to this zone.
 
 ## Routing
 

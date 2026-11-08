@@ -8,11 +8,9 @@ import {
   CognitoIdentityProviderClient, AdminCreateUserCommand, AdminSetUserPasswordCommand,
   AdminAddUserToGroupCommand, AdminDeleteUserCommand, InitiateAuthCommand,
 } from '@aws-sdk/client-cognito-identity-provider';
+import { BASE, TABLE, POOL, CLIENT } from './env.mjs';
 
 const REGION = process.env.AWS_REGION ?? 'us-west-2';
-const BASE = 'https://www.oakhurst-ball.org';
-const POOL = 'us-west-2_sgaAJES20';
-const CLIENT = '2fm9q7bir02ib5upgeeelivdii';
 const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({ region: REGION }));
 const cognito = new CognitoIdentityProviderClient({ region: REGION });
 const hex = (n) => randomBytes(n).toString('hex');
@@ -115,11 +113,11 @@ try {
   console.error(err);
   failures++;
 } finally {
-  for (const c of mine) await ddb.send(new DeleteCommand({ TableName: 'oakhurst', Key: { PK: 'EXPENSE', SK: c } })).catch(() => {});
+  for (const c of mine) await ddb.send(new DeleteCommand({ TableName: TABLE, Key: { PK: 'EXPENSE', SK: c } })).catch(() => {});
   // Player profiles created by the post-confirmation trigger? These users are
   // created by admin API (no trigger), so there are none to remove.
   for (const u of users) await cognito.send(new AdminDeleteUserCommand({ UserPoolId: POOL, Username: u })).catch(() => {});
-  const left = await ddb.send(new QueryCommand({ TableName: 'oakhurst', KeyConditionExpression: 'PK = :pk', FilterExpression: 'begins_with(note, :z)', ExpressionAttributeValues: { ':pk': 'EXPENSE', ':z': 'ZZ' } }));
+  const left = await ddb.send(new QueryCommand({ TableName: TABLE, KeyConditionExpression: 'PK = :pk', FilterExpression: 'begins_with(note, :z)', ExpressionAttributeValues: { ':pk': 'EXPENSE', ':z': 'ZZ' } }));
   console.log(`cleanup: ${users.length} users; leftover test expenses: ${left.Items?.length ?? 0}`);
   console.log(failures ? `${failures} FAILED` : 'ALL PASSED');
   process.exit(failures ? 1 : 0);
