@@ -55,17 +55,20 @@ export async function coveringPass(playerId: string, date = clubDate()): Promise
  */
 export const yearPassOnSale = (date = clubDate()) => clubQuarter(date) === 1;
 
-export type OfferStatus = 'available' | 'owned' | 'not_offered';
+/** owned: you hold this pass. covered: a year pass you hold already includes this quarter. */
+export type OfferStatus = 'available' | 'owned' | 'covered' | 'not_offered';
 
 /** What a player can buy right now, given what already covers them. */
 export function purchasable(current: Pass | null, date = clubDate()) {
   const offer = (plan: Plan) => {
     const period: Period = periodFor(plan, date);
-    const owned =
-      current?.plan === 'year' || (plan === 'quarter' && current?.periodId === period.periodId);
+    const owned = current?.plan === plan && current.periodId === period.periodId;
+    const covered = !owned && plan === 'quarter' && current?.plan === 'year';
     const status: OfferStatus = owned
       ? 'owned'
-      : plan === 'year' && !yearPassOnSale(date)
+      : covered
+        ? 'covered'
+        : plan === 'year' && !yearPassOnSale(date)
         ? 'not_offered'
         : 'available';
     return {

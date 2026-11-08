@@ -155,6 +155,7 @@ const passView = (p: Pass | null) =>
 async function planBlocked(playerId: string, plan: Plan, asAdmin = false): Promise<string | null> {
   const offer = purchasable(await coveringPass(playerId)).find((o) => o.plan === plan)!;
   if (offer.status === 'owned') return `You already have a pass for ${offer.label}`;
+  if (offer.status === 'covered') return 'Your year pass already covers this quarter';
   if (offer.status === 'not_offered' && !asAdmin) {
     return 'The year pass is only available Apr 1 – Jun 30. Buy a quarter pass instead.';
   }

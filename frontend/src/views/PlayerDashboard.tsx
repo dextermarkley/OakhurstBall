@@ -261,7 +261,8 @@ function SessionCard({ s, onChange }: { s: MySession; onChange: () => void }) {
 }
 
 function PlanCard({ s, className, onBuy }: { s: MySession; className?: string; onBuy: () => void }) {
-  const offers = s.options.plans.filter((o) => o.status !== 'not_offered');
+  // A quarter your year pass already covers isn't shown as a second pass.
+  const offers = s.options.plans.filter((o) => o.status !== 'not_offered' && o.status !== 'covered');
   const fee = s.feeCents || 500;
   const yearListed = offers.some((o) => o.plan === 'year');
 

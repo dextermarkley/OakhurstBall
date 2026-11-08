@@ -494,7 +494,7 @@ export function Kiosk() {
       </ChoiceRow>
       )}
       {opts.plans
-        .filter((o) => o.status !== 'not_offered')
+        .filter((o) => o.status !== 'not_offered' && o.status !== 'covered')
         .map((o: PlanOffer) => {
           const p: Purchase = { plan: o.plan, amountCents: o.priceCents, what: `${planName(o.plan)} · ${o.label}` };
           return (

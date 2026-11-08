@@ -532,7 +532,7 @@ export interface PlanOffer {
   label: string; // "Q1 2026–27 (Apr 1 – Jun 30)" / "2026–27 season"
   end: string; // YYYY-MM-DD
   /** not_offered: the year pass outside Q1 (Apr 1 – Jun 30). */
-  status: 'available' | 'owned' | 'not_offered';
+  status: 'available' | 'owned' | 'covered' | 'not_offered';
   available: boolean;
 }
 export interface PassView {

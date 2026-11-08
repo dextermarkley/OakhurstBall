@@ -125,6 +125,16 @@ test('offers: year shown in Q1, hidden after; quarter always (unless owned)', ()
   assert.equal(purchasable(yPass, '2026-05-01').find((o) => o.plan === 'year')!.status, 'owned');
 });
 
+test('offers: a year pass covers the quarter, but it is not shown as owning a quarter pass', () => {
+  for (const d of ['2026-05-01', '2026-11-08', '2027-02-01']) {
+    const yPass: any = { plan: 'year', periodId: periodFor('year', d).periodId };
+    const offers = purchasable(yPass, d);
+    assert.equal(offers.find((o) => o.plan === 'year')!.status, 'owned', d);
+    assert.equal(offers.find((o) => o.plan === 'quarter')!.status, 'covered', d);
+    assert.equal(offers.find((o) => o.plan === 'quarter')!.available, false, d);
+  }
+});
+
 // ── Expenses: input validation + season range ──
 import { checkExpense, seasonRange, seasonLabel } from '../src/lib/expenses.js';
 
