@@ -32,7 +32,9 @@ export async function queryAll<T = Record<string, any>>(input: QueryCommandInput
 // A cursor carries DynamoDB's LastEvaluatedKey, sealed with AES-256-GCM:
 //   base64url( version(1) | iv(12) | ciphertext | tag(16) )
 //   plaintext = JSON { k: <key>, x: <expires, unix seconds> }
-//   additional data = the query's partition, e.g. {"PK":"PLAYER#…"}
+//   additional data = the query's partition plus a scope naming the exact query
+//                     (index, key condition, values), so a payments cursor can't
+//                     be replayed on the check-ins list in the same partition
 // So a cursor is opaque (no ids, names or times are visible), can't be edited
 // or forged (GCM rejects any change), only opens for the same list it came
 // from, and expires after CURSOR_TTL_SECONDS. The key is a per-stack SSM
@@ -48,8 +50,8 @@ export class BadCursor extends Error {
   }
 }
 
-const aad = (partition: Record<string, string>) =>
-  Buffer.from(JSON.stringify(Object.keys(partition).sort().map((k) => [k, partition[k]])));
+const aad = (partition: Record<string, string>, scope: string) =>
+  Buffer.from(JSON.stringify([Object.keys(partition).sort().map((k) => [k, partition[k]]), scope]));
 
 /** Seal a key for this partition (pure: the 32-byte secret is passed in). */
 export function sealCursor(
@@ -57,11 +59,12 @@ export function sealCursor(
   partition: Record<string, string>,
   secret: Buffer,
   nowSec = Math.floor(Date.now() / 1000),
+  scope = '',
 ): string | null {
   if (!key) return null;
   const iv = randomBytes(12);
   const c = createCipheriv('aes-256-gcm', secret, iv);
-  c.setAAD(aad(partition));
+  c.setAAD(aad(partition, scope));
   const body = Buffer.concat([c.update(JSON.stringify({ k: key, x: nowSec + CURSOR_TTL_SECONDS })), c.final()]);
   return Buffer.concat([Buffer.from([CURSOR_VERSION]), iv, body, c.getAuthTag()]).toString('base64url');
 }
@@ -72,6 +75,7 @@ export function openCursor(
   partition: Record<string, string>,
   secret: Buffer,
   nowSec = Math.floor(Date.now() / 1000),
+  scope = '',
 ): Record<string, string> | undefined {
   if (cursor == null || cursor === '') return undefined;
   if (typeof cursor !== 'string' || cursor.length > 1400 || !/^[A-Za-z0-9_-]+$/.test(cursor)) throw new BadCursor();
@@ -80,7 +84,7 @@ export function openCursor(
   let payload: any;
   try {
     const d = createDecipheriv('aes-256-gcm', secret, raw.subarray(1, 13));
-    d.setAAD(aad(partition));
+    d.setAAD(aad(partition, scope));
     d.setAuthTag(raw.subarray(raw.length - 16));
     payload = JSON.parse(Buffer.concat([d.update(raw.subarray(13, raw.length - 16)), d.final()]).toString('utf8'));
   } catch {
@@ -112,13 +116,9 @@ function cursorSecret(): Promise<Buffer> {
   return secretP;
 }
 
-export const encodeCursor = async (key: Record<string, any> | undefined, partition: Record<string, string>) =>
-  key ? sealCursor(key, partition, await cursorSecret()) : null;
-
-export async function decodeCursor(cursor: unknown, partition: Record<string, string>) {
-  if (cursor == null || cursor === '') return undefined;
-  return openCursor(cursor, partition, await cursorSecret());
-}
+/** Names one exact query: a cursor from it only opens for the same query. */
+const scopeOf = (input: QueryCommandInput) =>
+  JSON.stringify([input.IndexName ?? '', input.KeyConditionExpression ?? '', input.ExpressionAttributeValues ?? {}]);
 
 /**
  * One page of a Query. `partition` is the partition the query reads (e.g.
@@ -128,10 +128,14 @@ export async function queryPage<T = Record<string, any>>(
   input: QueryCommandInput,
   opts: { cursor?: unknown; limit: number; partition: Record<string, string> },
 ): Promise<{ items: T[]; nextCursor: string | null }> {
-  const r = await ddb.send(
-    new QueryCommand({ ...input, Limit: opts.limit, ExclusiveStartKey: await decodeCursor(opts.cursor, opts.partition) }),
-  );
-  return { items: (r.Items ?? []) as T[], nextCursor: await encodeCursor(r.LastEvaluatedKey, opts.partition) };
+  const secret = await cursorSecret();
+  const scope = scopeOf(input);
+  const start = openCursor(opts.cursor, opts.partition, secret, undefined, scope);
+  const r = await ddb.send(new QueryCommand({ ...input, Limit: opts.limit, ExclusiveStartKey: start }));
+  return {
+    items: (r.Items ?? []) as T[],
+    nextCursor: sealCursor(r.LastEvaluatedKey, opts.partition, secret, undefined, scope),
+  };
 }
 
 /** ?limit= from a request, clamped to 1..max (default when missing or junk). */

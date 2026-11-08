@@ -162,6 +162,16 @@ try {
   const otherCursor = Buffer.from(JSON.stringify({ PK: `PLAYER#${others[0]}`, SK: 'PAYMENT#9' })).toString('base64url');
   const bad = await heavy.get(`/api/me/payments?cursor=${otherCursor}`);
   check('cursor for another player’s partition → 400', bad.status === 400, bad);
+  // Sealed cursors: nothing readable, and any edit is refused.
+  const cur = bal.body.paymentsCursor;
+  const peek = Buffer.from(cur, 'base64url').toString('latin1');
+  check('cursor is opaque (no ids, keys or dates inside)', !/PLAYER|PAYMENT|20\d\d|PK/.test(peek), peek.slice(0, 60));
+  const b = Buffer.from(cur, 'base64url');
+  b[b.length - 3] ^= 1;
+  const tampered = await heavy.get(`/api/me/payments?cursor=${b.toString('base64url')}`);
+  check('tampered cursor → 400', tampered.status === 400, tampered.status);
+  const crossList = await heavy.get(`/api/me/checkins?cursor=${cur}`);
+  check('payments cursor refused on the check-ins list → 400', crossList.status === 400, crossList.status);
   const junk = await heavy.get('/api/me/payments?cursor=%7B%7D');
   check('junk cursor → 400, not 500', junk.status === 400, junk.status);
   const noAdmin = await heavy.get('/api/admin/players');

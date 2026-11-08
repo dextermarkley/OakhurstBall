@@ -311,6 +311,10 @@ test('cursors are sealed: opaque, tamper-proof, bound to their list, expiring', 
   // Another list, a different key, any edited byte, junk: refused.
   assert.throws(() => openCursor(c, { PK: 'PLAYER#other' }, secret), BadCursor);
   assert.throws(() => openCursor(c, part, rb(32)), BadCursor);
+  // Same partition, different list (payments vs check-ins): refused.
+  const sc = sealCursor(key, part, secret, undefined, 'payments')!;
+  assert.deepEqual(openCursor(sc, part, secret, undefined, 'payments'), key);
+  assert.throws(() => openCursor(sc, part, secret, undefined, 'checkins'), BadCursor);
   const bytes = Buffer.from(c, 'base64url');
   for (const i of [0, 5, 20, bytes.length - 1]) {
     const b2 = Buffer.from(bytes);
