@@ -32,6 +32,13 @@ still do by hand. Live checks: `AWS_REGION=us-west-2 node backend/test/live-secu
 - Names are cleaned on the server (no control, zero-width or bidi characters, at
   most 60 characters); push titles are single lines.
 
+## Pagination cursors
+
+- List cursors are encrypted and signed (AES-256-GCM, per-stack key in SSM
+  `/oakhurst/cursor/key` and `/oakhurst-alpha/cursor/key`), bound to the list
+  they came from, and expire after 24 hours. They reveal nothing and can't be
+  edited or reused on another player's history.
+
 ## Kiosk
 
 - Wrong PINs: 5 in 15 minutes locks that player for the window, 20 in a day locks

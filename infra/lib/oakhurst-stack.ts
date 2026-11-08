@@ -322,6 +322,15 @@ export class OakhurstStack extends cdk.Stack {
         resources: [`arn:aws:ssm:${this.region}:${this.account}:parameter/${P}/stripe/*`],
       }),
     );
+    // Key that encrypts and signs pagination cursors (lib/page.ts). Created
+    // outside CDK, like the Stripe and push keys: 32 random bytes, hex.
+    apiFn.addEnvironment('CURSOR_KEY_PARAM', `/${P}/cursor/key`);
+    apiFn.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ['ssm:GetParameter'],
+        resources: [`arn:aws:ssm:${this.region}:${this.account}:parameter/${P}/cursor/*`],
+      }),
+    );
 
     // ───────────────────────── Chat images (S3) ─────────────────────────────
     // Private bucket, pay per use. Browsers upload with a presigned POST and read

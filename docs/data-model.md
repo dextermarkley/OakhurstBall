@@ -93,8 +93,9 @@ Every Query follows DynamoDB pagination (`backend/src/lib/page.ts`):
   (admins, one session's attendees, this period's passes, the pending queue).
   It stops with an error after 50 pages instead of growing silently.
 - `queryPage` returns one page plus `nextCursor` for lists sent to browsers. A
-  cursor is the base64url `LastEvaluatedKey`, checked to belong to the same
-  partition before use (a bad one is a 400).
+  cursor is DynamoDB's `LastEvaluatedKey` sealed with AES-256-GCM (key in SSM
+  `/<stack>/cursor/key`): opaque, tamper-proof, bound to the list it came
+  from, and valid for 24 hours. Anything else is a 400; the client reloads.
 
 Paged endpoints (pass `?cursor=`; `nextCursor` is null on the last page):
 

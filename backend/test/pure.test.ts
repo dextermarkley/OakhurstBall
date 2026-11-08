@@ -291,22 +291,43 @@ test('notices: text and last day are checked', () => {
 });
 
 // ── Pagination cursors ──
-import { encodeCursor, decodeCursor, pageLimit, BadCursor } from '../src/lib/page.js';
+import { sealCursor, openCursor, pageLimit, BadCursor, CURSOR_TTL_SECONDS } from '../src/lib/page.js';
+import { randomBytes as rb } from 'node:crypto';
 
-test('cursors round-trip and stay inside their partition', () => {
+test('cursors are sealed: opaque, tamper-proof, bound to their list, expiring', () => {
+  const secret = rb(32);
+  const part = { PK: 'PLAYER#abc' };
   const key = { PK: 'PLAYER#abc', SK: 'PAYMENT#2026-01-01T00:00:00Z#x' };
-  const c = encodeCursor(key)!;
-  assert.deepEqual(decodeCursor(c, { PK: 'PLAYER#abc' }), key);
-  assert.equal(decodeCursor(undefined, { PK: 'PLAYER#abc' }), undefined);
-  assert.equal(decodeCursor('', { PK: 'PLAYER#abc' }), undefined);
-  assert.equal(encodeCursor(undefined), null);
-  // Someone else's partition, extra attributes, non-string values, junk: refused.
-  assert.throws(() => decodeCursor(c, { PK: 'PLAYER#other' }), BadCursor);
-  assert.throws(() => decodeCursor(encodeCursor({ ...key, balanceCents: 'x' } as any)!, { PK: 'PLAYER#abc' }), BadCursor);
-  assert.throws(() => decodeCursor(encodeCursor({ PK: 'PLAYER#abc', SK: 5 } as any)!, { PK: 'PLAYER#abc' }), BadCursor);
-  assert.throws(() => decodeCursor('not base64!', { PK: 'PLAYER#abc' }), BadCursor);
-  assert.throws(() => decodeCursor('x'.repeat(2000), { PK: 'PLAYER#abc' }), BadCursor);
-  assert.throws(() => decodeCursor(['a'], { PK: 'PLAYER#abc' }), BadCursor);
+  const c = sealCursor(key, part, secret)!;
+  assert.deepEqual(openCursor(c, part, secret), key);
+  // Opaque: nothing of the key is readable.
+  const raw = Buffer.from(c, 'base64url').toString('latin1');
+  assert.ok(!raw.includes('PLAYER') && !raw.includes('2026'));
+  // Two cursors for the same key differ (random IV).
+  assert.notEqual(sealCursor(key, part, secret), c);
+  assert.equal(openCursor(undefined, part, secret), undefined);
+  assert.equal(openCursor('', part, secret), undefined);
+  assert.equal(sealCursor(undefined, part, secret), null);
+  // Another list, a different key, any edited byte, junk: refused.
+  assert.throws(() => openCursor(c, { PK: 'PLAYER#other' }, secret), BadCursor);
+  assert.throws(() => openCursor(c, part, rb(32)), BadCursor);
+  const bytes = Buffer.from(c, 'base64url');
+  for (const i of [0, 5, 20, bytes.length - 1]) {
+    const b2 = Buffer.from(bytes);
+    b2[i] ^= 1;
+    assert.throws(() => openCursor(b2.toString('base64url'), part, secret), BadCursor, `byte ${i}`);
+  }
+  assert.throws(() => openCursor(Buffer.from(JSON.stringify(key)).toString('base64url'), part, secret), BadCursor, 'plain JSON');
+  assert.throws(() => openCursor('not base64!', part, secret), BadCursor);
+  assert.throws(() => openCursor('x'.repeat(2000), part, secret), BadCursor);
+  assert.throws(() => openCursor(['a'], part, secret), BadCursor);
+  // Expired.
+  const now = Math.floor(Date.now() / 1000);
+  const old = sealCursor(key, part, secret, now - CURSOR_TTL_SECONDS - 1)!;
+  assert.throws(() => openCursor(old, part, secret, now), BadCursor);
+  // Sealed but with a key outside the partition / extra attributes: still refused.
+  assert.throws(() => openCursor(sealCursor({ PK: 'PLAYER#zzz', SK: 'x' }, part, secret)!, part, secret), BadCursor);
+  assert.throws(() => openCursor(sealCursor({ ...key, balanceCents: 'x' }, part, secret)!, part, secret), BadCursor);
 });
 
 test('page limits are clamped', () => {
