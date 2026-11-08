@@ -125,6 +125,8 @@ try {
   r = await q.call('POST', '/announcement/rsvp', { announceId: annId, status: 'out' });
   check('other RSVPs out, and sees both', r.body.announcement.rsvps.length === 2 && r.body.announcement.rsvps.find((x) => x.name === 'ZZ Comm player')?.status === 'in', r.body);
   r = await q.call('POST', '/announcement/rsvp', { announceId: annId, status: 'maybe' });
+  check('other switches to maybe', r.status === 200 && r.body.announcement.rsvps.find((x) => x.name === 'ZZ Comm other')?.status === 'maybe', r.body);
+  r = await q.call('POST', '/announcement/rsvp', { announceId: annId, status: 'perhaps' });
   check('bad RSVP status rejected', r.status === 400, r);
   r = await q.call('POST', '/announcement/rsvp', { announceId: hex(12), status: 'in' });
   check('RSVP to a stale announcement → 409', r.status === 409, r);

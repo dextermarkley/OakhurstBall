@@ -2,7 +2,7 @@
 //   AnnouncementCard — player page: read it, RSVP, see who's coming
 //   AnnounceAdminCard — admin Sessions tab: post / edit / take down
 import { useCallback, useEffect, useState } from 'react';
-import { Check, Megaphone, Pencil, Trash2, X } from 'lucide-react';
+import { Check, CircleHelp, Megaphone, Pencil, Trash2, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { api, type Rsvp, type RsvpStatus } from '@/api';
 import { useConfirm } from '@/components/confirm';
@@ -78,6 +78,15 @@ export function AnnouncementCard() {
             {busy === 'in' ? <Spinner /> : <Check />} I'm in
           </Button>
           <Button
+            variant={mine === 'maybe' ? 'default' : 'outline'}
+            className={cn(mine === 'maybe' && 'bg-brand text-brand-foreground hover:bg-brand/90')}
+            disabled={!!busy || !data?.myPlayerId}
+            onClick={() => rsvp('maybe')}
+            aria-pressed={mine === 'maybe'}
+          >
+            {busy === 'maybe' ? <Spinner /> : <CircleHelp />} Maybe
+          </Button>
+          <Button
             variant={mine === 'out' ? 'secondary' : 'outline'}
             disabled={!!busy || !data?.myPlayerId}
             onClick={() => rsvp('out')}
@@ -94,6 +103,7 @@ export function AnnouncementCard() {
 
 export function RsvpLists({ rsvps }: { rsvps: Rsvp[] }) {
   const ins = rsvps.filter((r) => r.status === 'in');
+  const maybes = rsvps.filter((r) => r.status === 'maybe');
   const outs = rsvps.filter((r) => r.status === 'out');
   if (!rsvps.length) return <p className="text-sm text-muted-foreground">No RSVPs yet. Be the first.</p>;
   return (
@@ -117,6 +127,26 @@ export function RsvpLists({ rsvps }: { rsvps: Rsvp[] }) {
           <p className="text-sm text-muted-foreground">Nobody yet.</p>
         )}
       </div>
+      {maybes.length > 0 && (
+        <div>
+          <div className="mb-2 text-sm font-medium">
+            <span className="tabular">{maybes.length}</span> maybe
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {maybes.map((r) => (
+              <span
+                key={r.playerId}
+                className="inline-flex items-center gap-1.5 rounded-full border border-dashed bg-background py-0.5 pr-2.5 pl-0.5 text-sm text-muted-foreground"
+              >
+                <Avatar className="size-6">
+                  <AvatarFallback className="bg-brand/12 text-[10px] font-medium text-brand">{initials(r.name)}</AvatarFallback>
+                </Avatar>
+                {r.name}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
       {outs.length > 0 && (
         <div className="text-sm text-muted-foreground">
           <span className="font-medium">Can't make it:</span> {outs.map((r) => r.name).join(', ')}

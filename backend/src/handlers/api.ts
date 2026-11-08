@@ -410,7 +410,9 @@ async function communityRouter(
   }
   if (path === '/api/announcement/rsvp' && m === 'POST') {
     const { announceId, status } = parseBody(event);
-    if (status !== 'in' && status !== 'out' && status !== null) return badRequest("status must be 'in', 'out' or null");
+    if (status !== 'in' && status !== 'maybe' && status !== 'out' && status !== null) {
+      return badRequest("status must be 'in', 'maybe', 'out' or null");
+    }
     const player = await getPlayerByCognitoSub(claims.sub);
     if (!player) return notFound('no linked player profile');
     const done = await setRsvp(String(announceId ?? ''), { playerId: player.playerId, name: player.name }, status);

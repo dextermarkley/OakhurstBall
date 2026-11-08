@@ -15,7 +15,7 @@ import { clubDate } from './repo.js';
 export const DEFAULT_ANNOUNCEMENT = 'Ball today OCI - 5:30';
 export const MAX_ANNOUNCEMENT = 280;
 
-export type RsvpStatus = 'in' | 'out';
+export type RsvpStatus = 'in' | 'maybe' | 'out';
 export interface Rsvp {
   playerId: string;
   name: string;

@@ -376,7 +376,7 @@ export interface ExpenseReport {
   lastAmounts: Partial<Record<ExpenseCategory, number>>;
 }
 
-export type RsvpStatus = 'in' | 'out';
+export type RsvpStatus = 'in' | 'maybe' | 'out';
 export interface Rsvp {
   playerId: string;
   name: string;
