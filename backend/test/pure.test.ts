@@ -271,3 +271,21 @@ test('kiosk tokens: fast hash verifies only the right token', () => {
   assert.equal(verifyToken(makeToken(), h), false);
   assert.equal(verifyToken(t, 'salt:hash'), false);
 });
+
+// ── Club notices ──
+import { checkNotice } from '../src/lib/notices.js';
+
+test('notices: text and last day are checked', () => {
+  const today = '2026-11-08';
+  assert.deepEqual(checkNotice({ text: '  Gym closed for the next 3 weeks ', until: '2026-11-29' }, today), {
+    text: 'Gym closed for the next 3 weeks',
+    until: '2026-11-29',
+  });
+  assert.equal(checkNotice({ text: 'Line one\r\n\r\n\r\nLine\u202e two', until: today }, today).text, 'Line one\n\nLine two');
+  assert.ok(checkNotice({ text: '', until: today }, today).error);
+  assert.ok(checkNotice({ text: 'x'.repeat(501), until: today }, today).error);
+  assert.ok(checkNotice({ text: 'Hi', until: '2026-11-07' }, today).error, 'past');
+  assert.ok(checkNotice({ text: 'Hi', until: '2027-06-01' }, today).error, 'over 180 days');
+  assert.ok(checkNotice({ text: 'Hi', until: 'next week' }, today).error);
+  assert.ok(checkNotice({ text: { x: 1 }, until: today }, today).error);
+});

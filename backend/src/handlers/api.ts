@@ -105,6 +105,7 @@ import {
   removeAnnouncement,
   setRsvp,
 } from '../lib/announce.js';
+import { activeNotices, checkNotice, editNotice, postNotice, removeNotice, MAX_ACTIVE_NOTICES } from '../lib/notices.js';
 import {
   changesSince,
   checkUpload,
@@ -588,6 +589,11 @@ async function apiRouter(
   if (!claims) return unauthorized();
   const admin = isAdmin(claims);
 
+  // GET /api/notices — club notices showing today (any signed-in member)
+  if (path === '/api/notices' && m === 'GET') {
+    return ok({ notices: await activeNotices() });
+  }
+
   if (path.startsWith('/api/chat') || path.startsWith('/api/announcement')) {
     const r = await communityRouter(event, path, m, claims, admin);
     if (r) return r;
@@ -1023,6 +1029,40 @@ async function apiRouter(
     }
     return m === 'POST' ? created({ announcement: { ...a, rsvps: [] } }) : ok({ announcement: await currentAnnouncement() });
   }
+  // ── Club notices (admin) ── plain messages, no RSVP, shown until a chosen day.
+  // POST   /api/admin/notices {text, until, notify}
+  // PUT    /api/admin/notices {noticeId, text, until, notify}
+  // DELETE /api/admin/notices {noticeId}
+  if (path === '/api/admin/notices' && (m === 'POST' || m === 'PUT')) {
+    const b = parseBody(event);
+    const { text, until, error } = checkNotice(b);
+    if (error) return badRequest(error);
+    let n;
+    if (m === 'POST') {
+      n = await postNotice(text!, until!, { sub: claims.sub, name: claims.name || claims.email || 'Admin' });
+      if (n === 'full') {
+        return json(409, { error: `Up to ${MAX_ACTIVE_NOTICES} notices can be up at once. Take one down first.` });
+      }
+    } else {
+      if (!isId(b.noticeId)) return notFound('Notice not found');
+      n = await editNotice(b.noticeId, text!, until!);
+      if (!n) return notFound('That notice was taken down');
+    }
+    if (b.notify === true) {
+      await sendPush((d) => d.sub !== claims.sub, {
+        title: m === 'POST' ? 'Oakhurst Basketball' : 'Updated: Oakhurst Basketball',
+        body: text!,
+        url: '/player',
+        tag: `notice-${n.noticeId}`,
+      }, { ttlSeconds: 24 * 3600 });
+    }
+    return m === 'POST' ? created({ notice: n }) : ok({ notice: n });
+  }
+  if (path === '/api/admin/notices' && m === 'DELETE') {
+    const { noticeId } = parseBody(event);
+    return ok({ removed: isId(noticeId) ? await removeNotice(noticeId) : false });
+  }
+
   if (path === '/api/admin/announcement' && m === 'DELETE') {
     const { announceId } = parseBody(event);
     return ok({ removed: await removeAnnouncement(String(announceId ?? '')) });

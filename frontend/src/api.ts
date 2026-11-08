@@ -71,6 +71,31 @@ export const api = {
       body: JSON.stringify({ announceId, text, notify }),
     });
   },
+  // club notices (plain messages, no RSVP)
+  async notices() {
+    return req<{ notices: Notice[] }>('/api/notices', { headers: await authHeaders() });
+  },
+  async postNotice(text: string, until: string, notify: boolean) {
+    return req<{ notice: Notice }>('/api/admin/notices', {
+      method: 'POST',
+      headers: await authHeaders(),
+      body: JSON.stringify({ text, until, notify }),
+    });
+  },
+  async editNotice(noticeId: string, text: string, until: string, notify: boolean) {
+    return req<{ notice: Notice }>('/api/admin/notices', {
+      method: 'PUT',
+      headers: await authHeaders(),
+      body: JSON.stringify({ noticeId, text, until, notify }),
+    });
+  },
+  async removeNotice(noticeId: string) {
+    return req<{ removed: boolean }>('/api/admin/notices', {
+      method: 'DELETE',
+      headers: await authHeaders(),
+      body: JSON.stringify({ noticeId }),
+    });
+  },
   async removeAnnouncement(announceId: string) {
     return req<{ removed: boolean }>('/api/admin/announcement', {
       method: 'DELETE',
@@ -377,6 +402,15 @@ export interface ExpenseReport {
   lastAmounts: Partial<Record<ExpenseCategory, number>>;
 }
 
+export interface Notice {
+  noticeId: string;
+  text: string;
+  /** Last club day it shows (YYYY-MM-DD). */
+  until: string;
+  createdAt: string;
+  updatedAt: string;
+  createdByName: string;
+}
 export type RsvpStatus = 'in' | 'maybe' | 'out';
 export interface Rsvp {
   playerId: string;

@@ -18,6 +18,21 @@ Storage: `CURRENT/ANNOUNCE` points at `ANN#<id>/META`; RSVPs are
 `ANN#<id>/RSVP#<playerId>`. Code: `backend/src/lib/announce.ts`,
 `frontend/src/components/announcement.tsx`.
 
+## Club notices
+
+Plain messages with no RSVP, like "Gym closed for the next 3 weeks". Admins
+post them from the **Club notices** card on Admin → Overview or Admin → Sessions.
+
+- Up to 500 characters, line breaks kept.
+- **Show until** picks the last day it shows (quick picks: Today, 1 week,
+  2 weeks, 3 weeks, 1 month; at most 180 days). It comes down after that day.
+- **Notify everyone** (on by default) sends it as a notification.
+- Up to 5 can be up at once. They show at the top of every player page, above
+  the session announcement. Edit or take one down any time.
+
+Storage: `NOTICE/N#<id>`, deleted by TTL a few days after its last day. Code:
+`backend/src/lib/notices.ts`, `frontend/src/components/notices.tsx`.
+
 ## Chat
 
 `/chat` (the Chat button in the header) is one room for every signed-in member.

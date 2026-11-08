@@ -34,6 +34,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { balanceText, dateOf, money, planName, timeOf, ymdText } from '@/lib/format';
 import { PayDialog } from './PayDialog';
 import { AnnouncementCard } from '@/components/announcement';
+import { NoticesList } from '@/components/notices';
 import { cn } from '@/lib/utils';
 
 export function PlayerDashboard() {
@@ -94,6 +95,7 @@ export function PlayerDashboard() {
       </div>
       <PayDialog open={paying} onClose={() => setPaying(false)} s={session} onChanged={load} />
 
+      <NoticesList />
       <AnnouncementCard />
 
       <SessionCard s={session} onChange={load} />
