@@ -289,3 +289,30 @@ test('notices: text and last day are checked', () => {
   assert.ok(checkNotice({ text: 'Hi', until: 'next week' }, today).error);
   assert.ok(checkNotice({ text: { x: 1 }, until: today }, today).error);
 });
+
+// ── Pagination cursors ──
+import { encodeCursor, decodeCursor, pageLimit, BadCursor } from '../src/lib/page.js';
+
+test('cursors round-trip and stay inside their partition', () => {
+  const key = { PK: 'PLAYER#abc', SK: 'PAYMENT#2026-01-01T00:00:00Z#x' };
+  const c = encodeCursor(key)!;
+  assert.deepEqual(decodeCursor(c, { PK: 'PLAYER#abc' }), key);
+  assert.equal(decodeCursor(undefined, { PK: 'PLAYER#abc' }), undefined);
+  assert.equal(decodeCursor('', { PK: 'PLAYER#abc' }), undefined);
+  assert.equal(encodeCursor(undefined), null);
+  // Someone else's partition, extra attributes, non-string values, junk: refused.
+  assert.throws(() => decodeCursor(c, { PK: 'PLAYER#other' }), BadCursor);
+  assert.throws(() => decodeCursor(encodeCursor({ ...key, balanceCents: 'x' } as any)!, { PK: 'PLAYER#abc' }), BadCursor);
+  assert.throws(() => decodeCursor(encodeCursor({ PK: 'PLAYER#abc', SK: 5 } as any)!, { PK: 'PLAYER#abc' }), BadCursor);
+  assert.throws(() => decodeCursor('not base64!', { PK: 'PLAYER#abc' }), BadCursor);
+  assert.throws(() => decodeCursor('x'.repeat(2000), { PK: 'PLAYER#abc' }), BadCursor);
+  assert.throws(() => decodeCursor(['a'], { PK: 'PLAYER#abc' }), BadCursor);
+});
+
+test('page limits are clamped', () => {
+  assert.equal(pageLimit(undefined, 25, 100), 25);
+  assert.equal(pageLimit('10', 25, 100), 10);
+  assert.equal(pageLimit('5000', 25, 100), 100);
+  assert.equal(pageLimit('0', 25, 100), 25);
+  assert.equal(pageLimit('abc', 25, 100), 25);
+});

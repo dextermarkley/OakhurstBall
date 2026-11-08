@@ -16,6 +16,7 @@ import { DeleteObjectCommand, GetObjectCommand, HeadObjectCommand, S3Client } fr
 import { createPresignedPost } from '@aws-sdk/s3-presigned-post';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { ddb, TABLE } from './ddb.js';
+import { queryAll } from './page.js';
 import { newId } from './crypto.js';
 import { sendPush } from './push.js';
 import { approvedSubs } from './repo.js';
@@ -282,16 +283,14 @@ export async function markChatSeen(sub: string) {
  * per device that updates in place (tag 'chat'), not a stack of them.
  */
 export async function notifyChat(msg: ChatMessage) {
-  const r = await ddb.send(
-    new QueryCommand({
-      TableName: TABLE,
-      KeyConditionExpression: 'PK = :pk',
-      ExpressionAttributeValues: { ':pk': 'PREFS' },
-    }),
-  );
+  const prefs = await queryAll({
+    TableName: TABLE,
+    KeyConditionExpression: 'PK = :pk',
+    ExpressionAttributeValues: { ':pk': 'PREFS' },
+  });
   const cutoff = new Date(Date.now() - 30_000).toISOString();
   const wanted = new Set(
-    (r.Items ?? [])
+    prefs
       .filter((p) => p.chatNotify && !(p.chatSeenAt && p.chatSeenAt > cutoff))
       .map((p) => String(p.SK).slice('USER#'.length)),
   );

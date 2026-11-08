@@ -7,8 +7,9 @@
 //   PK=CURRENT    SK=ANNOUNCE   pointer { announceId, date }
 //   PK=ANN#<id>   SK=META       the announcement
 //   PK=ANN#<id>   SK=RSVP#<playerId>  { playerId, name, status: in|out, at }
-import { DeleteCommand, PutCommand, QueryCommand, GetCommand, TransactWriteCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
+import { DeleteCommand, PutCommand, GetCommand, TransactWriteCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
 import { ddb, TABLE } from './ddb.js';
+import { queryAll } from './page.js';
 import { newId } from './crypto.js';
 import { clubDate } from './repo.js';
 
@@ -40,14 +41,11 @@ const rsvpKey = (id: string, playerId: string) => ({ PK: `ANN#${id}`, SK: `RSVP#
 export async function currentAnnouncement(): Promise<(Announcement & { rsvps: Rsvp[] }) | null> {
   const ptr = (await ddb.send(new GetCommand({ TableName: TABLE, Key: POINTER }))).Item;
   if (!ptr || ptr.date !== clubDate()) return null;
-  const r = await ddb.send(
-    new QueryCommand({
-      TableName: TABLE,
-      KeyConditionExpression: 'PK = :pk',
-      ExpressionAttributeValues: { ':pk': `ANN#${ptr.announceId}` },
-    }),
-  );
-  const items = r.Items ?? [];
+  const items = await queryAll({
+    TableName: TABLE,
+    KeyConditionExpression: 'PK = :pk',
+    ExpressionAttributeValues: { ':pk': `ANN#${ptr.announceId}` },
+  });
   const m = items.find((i) => i.SK === 'META');
   if (!m) return null;
   const rsvps = items

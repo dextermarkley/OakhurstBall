@@ -1,6 +1,6 @@
 // The signed-in player's own page: gym session + check-in, plan, balance,
 // attendance chart, kiosk PIN, and history. Also shown in Admin → "My account".
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -118,17 +118,22 @@ export function PlayerDashboard() {
         <StatCard
           label="Check-ins"
           icon={CalendarCheck}
-          value={data.checkins.length}
+          value={data.checkinCount ?? data.checkins.length}
           hint={data.checkins[0] ? `All time · last ${dateOf(data.checkins[0].at)}` : 'No check-ins yet'}
         />
       </div>
 
       <div className="grid gap-6 lg:grid-cols-5">
         <PlanCard s={session} className="lg:col-span-2" onBuy={() => setPaying(true)} />
-        <AttendanceChart checkins={data.checkins} className="lg:col-span-3" />
+        <AttendanceChart byMonth={data.checkinsByMonth ?? {}} className="lg:col-span-3" />
       </div>
 
-      <HistoryCard checkins={data.checkins} payments={data.payments} />
+      <HistoryCard
+        checkins={data.checkins}
+        payments={data.payments}
+        checkinsCursor={data.checkinsCursor ?? null}
+        paymentsCursor={data.paymentsCursor ?? null}
+      />
       <PinCard />
     </div>
   );
@@ -308,7 +313,8 @@ function PlanCard({ s, className, onBuy }: { s: MySession; className?: string; o
 
 const chartConfig = { sessions: { label: 'Sessions', color: 'var(--chart-1)' } } satisfies ChartConfig;
 
-function AttendanceChart({ checkins, className }: { checkins: any[]; className?: string }) {
+/** byMonth: check-ins per YYYY-MM for the last 6 months, counted by the server. */
+function AttendanceChart({ byMonth, className }: { byMonth: Record<string, number>; className?: string }) {
   const data = useMemo(() => {
     const now = new Date();
     return Array.from({ length: 6 }, (_, i) => {
@@ -316,10 +322,10 @@ function AttendanceChart({ checkins, className }: { checkins: any[]; className?:
       const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
       return {
         month: d.toLocaleDateString([], { month: 'short' }),
-        sessions: checkins.filter((c) => String(c.eventDate ?? c.at).startsWith(key)).length,
+        sessions: byMonth[key] ?? 0,
       };
     });
-  }, [checkins]);
+  }, [byMonth]);
 
   return (
     <Card className={className}>
@@ -341,7 +347,76 @@ function AttendanceChart({ checkins, className }: { checkins: any[]; className?:
   );
 }
 
-function HistoryCard({ checkins, payments }: { checkins: any[]; payments: any[] }) {
+/**
+ * The newest page of a history list comes with the account data (and refreshes
+ * with it); "Show older" fetches the next page by cursor and keeps it.
+ */
+function useOlder(
+  first: any[],
+  firstCursor: string | null,
+  idOf: (x: any) => string,
+  fetchMore: (c: string) => Promise<{ items: any[]; nextCursor: string | null }>,
+) {
+  const [older, setOlder] = useState<any[]>([]);
+  const [cursor, setCursor] = useState<string | null>(firstCursor);
+  const [busy, setBusy] = useState(false);
+  const started = useRef(false);
+  useEffect(() => {
+    if (!started.current) setCursor(firstCursor);
+  }, [firstCursor]);
+  const all = useMemo(() => {
+    const seen = new Set(first.map(idOf));
+    return [...first, ...older.filter((x) => !seen.has(idOf(x)))];
+  }, [first, older]); // eslint-disable-line react-hooks/exhaustive-deps
+  async function more() {
+    if (!cursor) return;
+    setBusy(true);
+    try {
+      const r = await fetchMore(cursor);
+      started.current = true;
+      setOlder((o) => [...o, ...r.items]);
+      setCursor(r.nextCursor);
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  return { all, hasMore: !!cursor, busy, more };
+}
+
+function ShowOlder({ h }: { h: { hasMore: boolean; busy: boolean; more: () => void } }) {
+  if (!h.hasMore) return null;
+  return (
+    <div className="mt-3 flex justify-center">
+      <Button variant="outline" size="sm" disabled={h.busy} onClick={h.more}>
+        {h.busy && <Spinner />} Show older
+      </Button>
+    </div>
+  );
+}
+
+function HistoryCard({
+  checkins: firstCheckins,
+  payments: firstPayments,
+  checkinsCursor,
+  paymentsCursor,
+}: {
+  checkins: any[];
+  payments: any[];
+  checkinsCursor: string | null;
+  paymentsCursor: string | null;
+}) {
+  const c = useOlder(firstCheckins, checkinsCursor, (x) => x.at, async (cur) => {
+    const r = await api.myCheckins(cur);
+    return { items: r.checkins, nextCursor: r.nextCursor };
+  });
+  const p = useOlder(firstPayments, paymentsCursor, (x) => x.paymentId, async (cur) => {
+    const r = await api.myPayments(cur);
+    return { items: r.payments, nextCursor: r.nextCursor };
+  });
+  const checkins = c.all;
+  const payments = p.all;
   return (
     <Card>
       <Tabs defaultValue="checkins">
@@ -368,8 +443,8 @@ function HistoryCard({ checkins, payments }: { checkins: any[]; payments: any[] 
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {checkins.map((c: any, i: number) => (
-                    <TableRow key={i}>
+                  {checkins.map((c: any) => (
+                    <TableRow key={c.at}>
                       <TableCell className="font-medium">{dateOf(c.at)}</TableCell>
                       <TableCell className="text-muted-foreground">{timeOf(c.at)}</TableCell>
                       <TableCell className="tabular text-right">
@@ -386,6 +461,7 @@ function HistoryCard({ checkins, payments }: { checkins: any[]; payments: any[] 
                 </TableBody>
               </Table>
             )}
+            <ShowOlder h={c} />
           </TabsContent>
           <TabsContent value="payments">
             {payments.length === 0 ? (
@@ -416,6 +492,7 @@ function HistoryCard({ checkins, payments }: { checkins: any[]; payments: any[] 
                 </TableBody>
               </Table>
             )}
+            <ShowOlder h={p} />
           </TabsContent>
         </CardContent>
       </Tabs>

@@ -1,8 +1,9 @@
 // Period passes (quarter / year). One item per player per period:
 //   PLAYER#<pid> / PASS#<periodId>   GSI1PK = PASS#<periodId>, GSI1SK = <pid>
 // The GSI lets the Admin page list everyone holding the current quarter/year pass.
-import { BatchGetCommand, PutCommand, QueryCommand } from '@aws-sdk/lib-dynamodb';
+import { BatchGetCommand, PutCommand } from '@aws-sdk/lib-dynamodb';
 import { ddb, TABLE, GSI1 } from './ddb.js';
+import { queryAll } from './page.js';
 import { periodFor, clubQuarter, PLAN_PRICES, type Period, type Plan } from './plans.js';
 import { clubDate } from './repo.js';
 
@@ -83,15 +84,13 @@ export function purchasable(current: Pass | null, date = clubDate()) {
 export async function currentPassHolders(date = clubDate()): Promise<Map<string, Pass>> {
   const out = new Map<string, Pass>();
   for (const plan of ['quarter', 'year'] as const) {
-    const r = await ddb.send(
-      new QueryCommand({
-        TableName: TABLE,
-        IndexName: GSI1,
-        KeyConditionExpression: 'GSI1PK = :pk',
-        ExpressionAttributeValues: { ':pk': `PASS#${periodFor(plan, date).periodId}` },
-      }),
-    );
-    for (const p of (r.Items ?? []) as Pass[]) {
+    const holders = await queryAll<Pass>({
+      TableName: TABLE,
+      IndexName: GSI1,
+      KeyConditionExpression: 'GSI1PK = :pk',
+      ExpressionAttributeValues: { ':pk': `PASS#${periodFor(plan, date).periodId}` },
+    });
+    for (const p of holders) {
       if (plan === 'year' || !out.has(p.playerId)) out.set(p.playerId, p); // year wins
     }
   }
@@ -125,12 +124,10 @@ export async function grantPass(playerId: string, plan: Plan, grantedBy: string)
 
 /** A player's passes, newest first. */
 export async function playerPasses(playerId: string): Promise<Pass[]> {
-  const r = await ddb.send(
-    new QueryCommand({
-      TableName: TABLE,
-      KeyConditionExpression: 'PK = :pk AND begins_with(SK, :sk)',
-      ExpressionAttributeValues: { ':pk': `PLAYER#${playerId}`, ':sk': 'PASS#' },
-    }),
-  );
-  return ((r.Items ?? []) as Pass[]).sort((a, b) => b.start.localeCompare(a.start));
+  const passes = await queryAll<Pass>({
+    TableName: TABLE,
+    KeyConditionExpression: 'PK = :pk AND begins_with(SK, :sk)',
+    ExpressionAttributeValues: { ':pk': `PLAYER#${playerId}`, ':sk': 'PASS#' },
+  });
+  return passes.sort((a, b) => b.start.localeCompare(a.start));
 }

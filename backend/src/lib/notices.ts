@@ -5,8 +5,9 @@
 //
 //   PK=NOTICE  SK=N#<id>   { noticeId, text, until (club date, inclusive), ... }
 //   expiresAt (TTL) deletes it a few days after `until`.
-import { DeleteCommand, PutCommand, QueryCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
+import { DeleteCommand, PutCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
 import { ddb, TABLE } from './ddb.js';
+import { queryAll } from './page.js';
 import { newId } from './crypto.js';
 import { clubDate } from './repo.js';
 
@@ -63,14 +64,12 @@ const view = (i: any): Notice => ({
 
 /** Notices showing today, newest first. */
 export async function activeNotices(today = clubDate()): Promise<Notice[]> {
-  const r = await ddb.send(
-    new QueryCommand({
-      TableName: TABLE,
-      KeyConditionExpression: 'PK = :pk',
-      ExpressionAttributeValues: { ':pk': 'NOTICE' },
-    }),
-  );
-  return (r.Items ?? [])
+  const items = await queryAll({
+    TableName: TABLE,
+    KeyConditionExpression: 'PK = :pk',
+    ExpressionAttributeValues: { ':pk': 'NOTICE' },
+  });
+  return items
     .filter((i) => i.until >= today)
     .map(view)
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));

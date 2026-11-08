@@ -8,7 +8,8 @@ import {
   UpdateCommand,
   DeleteCommand,
 } from '@aws-sdk/lib-dynamodb';
-import { ddb, TABLE, GSI1, keys, gsi } from './ddb.js';
+import { ddb, TABLE, GSI1, BY_SUB, keys, gsi } from './ddb.js';
+import { queryAll, queryPage } from './page.js';
 import { newId } from './crypto.js';
 import { paymentView } from './views.js';
 import { cleanName } from './text.js';
@@ -23,17 +24,41 @@ export async function getPlayer(playerId: string): Promise<Player | null> {
   return (r.Item as Player) ?? null;
 }
 
+/**
+ * The player linked to a Cognito account. Runs on almost every request, so it is
+ * an index lookup (BySub: cognitoSub → key), not a read of every player.
+ * The index is eventually consistent; a profile created a moment ago (sign-up)
+ * may not be in it yet, so a miss falls back to the paged player list.
+ */
 export async function getPlayerByCognitoSub(sub: string): Promise<Player | null> {
-  const r = await ddb.send(
-    new QueryCommand({
-      TableName: TABLE,
-      IndexName: GSI1,
-      KeyConditionExpression: 'GSI1PK = :pk',
-      FilterExpression: 'cognitoSub = :sub',
-      ExpressionAttributeValues: { ':pk': 'PLAYER', ':sub': sub },
-    }),
-  );
-  return ((r.Items ?? [])[0] as Player) ?? null;
+  if (!sub) return null;
+  let found: Record<string, any>[] = [];
+  try {
+    const hit = await ddb.send(
+      new QueryCommand({
+        TableName: TABLE,
+        IndexName: BY_SUB,
+        KeyConditionExpression: 'cognitoSub = :s',
+        ExpressionAttributeValues: { ':s': sub },
+      }),
+    );
+    found = hit.Items ?? [];
+  } catch (err: any) {
+    // While a new index is still being built, DynamoDB rejects queries on it;
+    // use the slow path below until it's ready instead of failing the request.
+    if (err?.name !== 'ValidationException' && err?.name !== 'ResourceNotFoundException') throw err;
+    console.warn('BySub index not ready; using the player list', err?.name);
+  }
+  const k = found.find((i) => String(i.PK).startsWith('PLAYER#') && i.SK === 'PROFILE');
+  if (k) return getPlayer(String(k.PK).slice('PLAYER#'.length));
+  const all = await queryAll<Player>({
+    TableName: TABLE,
+    IndexName: GSI1,
+    KeyConditionExpression: 'GSI1PK = :pk',
+    FilterExpression: 'cognitoSub = :sub',
+    ExpressionAttributeValues: { ':pk': 'PLAYER', ':sub': sub },
+  });
+  return all[0] ?? null;
 }
 
 export async function createPlayer(input: {
@@ -74,30 +99,53 @@ export async function createPlayer(input: {
   return player;
 }
 
-/** Public list for the kiosk picker (no hashes). */
+const publicPlayer = (i: any): PublicPlayer => ({
+  playerId: i.playerId,
+  name: i.name,
+  balanceCents: i.balanceCents,
+  waiverVersion: i.waiverVersion,
+  rulesVersion: i.rulesVersion,
+  agreedAt: i.agreedAt,
+  approved: !!i.approved,
+  email: i.email,
+  createdAt: i.createdAt,
+  hasAccount: !!i.cognitoSub,
+});
+
+const PLAYER_LIST = {
+  TableName: TABLE,
+  IndexName: GSI1,
+  KeyConditionExpression: 'GSI1PK = :pk',
+  ExpressionAttributeValues: { ':pk': 'PLAYER' },
+};
+
+/** One page of players, A–Z by name (no hashes). */
+export async function listPlayersPage(cursor: unknown, limit: number) {
+  const r = await queryPage(PLAYER_LIST, { cursor, limit, partition: { GSI1PK: 'PLAYER' } });
+  return { players: r.items.map(publicPlayer), nextCursor: r.nextCursor };
+}
+
+/** playerId → owes money (balance below zero), read for just these players. */
+export async function negativeFlags(playerIds: string[]): Promise<Map<string, boolean>> {
+  const out = new Map<string, boolean>();
+  const ids = [...new Set(playerIds)];
+  for (let i = 0; i < ids.length; i += 100) {
+    // BatchGet takes 100 keys; retry whatever DynamoDB hands back unprocessed.
+    let keysLeft: any[] = ids.slice(i, i + 100).map((id) => keys.playerProfile(id));
+    for (let tries = 0; keysLeft.length && tries < 5; tries++) {
+      const r = await ddb.send(
+        new BatchGetCommand({ RequestItems: { [TABLE]: { Keys: keysLeft, ProjectionExpression: 'playerId, balanceCents' } } }),
+      );
+      for (const it of r.Responses?.[TABLE] ?? []) out.set(it.playerId, Number(it.balanceCents ?? 0) < 0);
+      keysLeft = (r.UnprocessedKeys?.[TABLE]?.Keys as any[]) ?? [];
+    }
+  }
+  return out;
+}
+
+/** Every player, A–Z by name (server-side use). */
 export async function listPlayers(): Promise<PublicPlayer[]> {
-  const r = await ddb.send(
-    new QueryCommand({
-      TableName: TABLE,
-      IndexName: GSI1,
-      KeyConditionExpression: 'GSI1PK = :pk',
-      ExpressionAttributeValues: { ':pk': 'PLAYER' },
-    }),
-  );
-  return (r.Items ?? [])
-    .map((i: any) => ({
-      playerId: i.playerId,
-      name: i.name,
-      balanceCents: i.balanceCents,
-      waiverVersion: i.waiverVersion,
-      rulesVersion: i.rulesVersion,
-      agreedAt: i.agreedAt,
-      approved: !!i.approved,
-      email: i.email,
-      createdAt: i.createdAt,
-      hasAccount: !!i.cognitoSub,
-    }))
-    .sort((a, b) => a.name.localeCompare(b.name));
+  return (await queryAll(PLAYER_LIST)).map(publicPlayer);
 }
 
 /** Approve (or un-approve) a player for members-only features like the chat. */
@@ -157,21 +205,15 @@ export async function setPlayerPin(playerId: string, pinHash: string): Promise<v
 }
 
 // ───────────────────────────── Admins ───────────────────────────────────────
+const adminItems = () =>
+  queryAll({ TableName: TABLE, IndexName: GSI1, KeyConditionExpression: 'GSI1PK = :pk', ExpressionAttributeValues: { ':pk': 'ADMIN' } });
 export async function getAdmin(adminId: string): Promise<Admin | null> {
   const r = await ddb.send(new GetCommand({ TableName: TABLE, Key: keys.adminProfile(adminId) }));
   return (r.Item as Admin) ?? null;
 }
 
 export async function listAdmins(): Promise<Array<{ adminId: string; name: string }>> {
-  const r = await ddb.send(
-    new QueryCommand({
-      TableName: TABLE,
-      IndexName: GSI1,
-      KeyConditionExpression: 'GSI1PK = :pk',
-      ExpressionAttributeValues: { ':pk': 'ADMIN' },
-    }),
-  );
-  return (r.Items ?? [])
+  return (await adminItems())
     .filter((a: any) => a.active)
     .map((a: any) => ({ adminId: a.adminId, name: a.name }))
     .sort((a, b) => a.name.localeCompare(b.name));
@@ -181,15 +223,7 @@ export async function listAdmins(): Promise<Array<{ adminId: string; name: strin
 export async function listAdminsDetailed(): Promise<
   Array<{ adminId: string; name: string; email?: string; active: boolean }>
 > {
-  const r = await ddb.send(
-    new QueryCommand({
-      TableName: TABLE,
-      IndexName: GSI1,
-      KeyConditionExpression: 'GSI1PK = :pk',
-      ExpressionAttributeValues: { ':pk': 'ADMIN' },
-    }),
-  );
-  return (r.Items ?? [])
+  return (await adminItems())
     .map((a: any) => ({ adminId: a.adminId, name: a.name, email: a.email, active: !!a.active }))
     .sort((a, b) => a.name.localeCompare(b.name));
 }
@@ -202,15 +236,7 @@ export async function listAdminsDetailed(): Promise<
  */
 export async function linkAdminSub(email: string, sub: string): Promise<void> {
   const e = email.toLowerCase();
-  const r = await ddb.send(
-    new QueryCommand({
-      TableName: TABLE,
-      IndexName: GSI1,
-      KeyConditionExpression: 'GSI1PK = :pk',
-      ExpressionAttributeValues: { ':pk': 'ADMIN' },
-    }),
-  );
-  for (const a of (r.Items ?? []) as Admin[]) {
+  for (const a of (await adminItems()) as Admin[]) {
     if (a.cognitoSub || a.email?.toLowerCase() !== e) continue;
     await ddb
       .send(
@@ -286,44 +312,121 @@ export function clubDate(d = new Date()): string {
 
 // Check-ins are per gym session — see sessions.ts.
 
-export async function playerCheckins(playerId: string, limit = 50): Promise<CheckIn[]> {
-  const r = await ddb.send(
-    new QueryCommand({
-      TableName: TABLE,
-      KeyConditionExpression: 'PK = :pk AND begins_with(SK, :sk)',
-      ExpressionAttributeValues: { ':pk': `PLAYER#${playerId}`, ':sk': 'CHECKIN#' },
-      ScanIndexForward: false,
-      Limit: limit,
-    }),
-  );
-  return (r.Items ?? []) as CheckIn[];
+const checkinView = (i: any) => ({
+  eventDate: i.eventDate,
+  at: i.at,
+  source: i.source,
+  feeCents: i.feeCents ?? 0,
+  sessionId: i.sessionId,
+  coveredBy: i.coveredBy,
+  ...(i.freeDay ? { freeDay: true } : {}),
+});
+
+/**
+ * Totals for the player page without reading their whole history:
+ *   checkinCount  all-time, a counter on the profile (each check-in ADDs 1).
+ *                 Profiles from before the counter get an exact count once
+ *                 (checkinCountV marks it), after which the counter is kept.
+ *   byMonth       check-ins per month (YYYY-MM) since the start of the month
+ *                 five months ago: a bounded range read, not the full history.
+ */
+export async function checkinStats(player: Player & { checkinCount?: number; checkinCountV?: number }) {
+  const pk = `PLAYER#${player.playerId}`;
+  let count = player.checkinCount ?? 0;
+  if (!player.checkinCountV) {
+    count = 0;
+    let start: Record<string, any> | undefined;
+    do {
+      const r = await ddb.send(
+        new QueryCommand({
+          TableName: TABLE,
+          KeyConditionExpression: 'PK = :pk AND begins_with(SK, :sk)',
+          ExpressionAttributeValues: { ':pk': pk, ':sk': 'CHECKIN#' },
+          Select: 'COUNT',
+          ExclusiveStartKey: start,
+        }),
+      );
+      count += r.Count ?? 0;
+      start = r.LastEvaluatedKey;
+    } while (start);
+    await ddb
+      .send(
+        new UpdateCommand({
+          TableName: TABLE,
+          Key: keys.playerProfile(player.playerId),
+          UpdateExpression: 'SET checkinCount = :n, checkinCountV = :v',
+          ConditionExpression: 'attribute_exists(PK) AND attribute_not_exists(checkinCountV)',
+          ExpressionAttributeValues: { ':n': count, ':v': 1 },
+        }),
+      )
+      .catch((err) => {
+        if (err?.name !== 'ConditionalCheckFailedException') throw err;
+      });
+  }
+  const d = new Date(`${clubDate()}T12:00:00Z`);
+  d.setUTCDate(1);
+  d.setUTCMonth(d.getUTCMonth() - 5);
+  const from = d.toISOString().slice(0, 10);
+  const recent = await queryAll<{ eventDate?: string; at: string }>({
+    TableName: TABLE,
+    // SK holds the UTC time; start a day early and bucket by club date below.
+    KeyConditionExpression: 'PK = :pk AND SK BETWEEN :a AND :b',
+    ExpressionAttributeValues: { ':pk': pk, ':a': `CHECKIN#${from.slice(0, 8)}00`, ':b': 'CHECKIN#\uffff' },
+    ProjectionExpression: 'eventDate, #at',
+    ExpressionAttributeNames: { '#at': 'at' },
+  });
+  const byMonth: Record<string, number> = {};
+  for (const c of recent) {
+    const day = c.eventDate ?? clubDate(new Date(c.at));
+    if (day < from) continue;
+    byMonth[day.slice(0, 7)] = (byMonth[day.slice(0, 7)] ?? 0) + 1;
+  }
+  return { checkinCount: count, byMonth };
 }
 
-export async function playerPayments(playerId: string, limit = 50) {
-  const r = await ddb.send(
-    new QueryCommand({
+/** A page of the player's check-ins, newest first. */
+export async function playerCheckins(playerId: string, opts: { cursor?: unknown; limit?: number } = {}) {
+  const pk = `PLAYER#${playerId}`;
+  const r = await queryPage(
+    {
       TableName: TABLE,
       KeyConditionExpression: 'PK = :pk AND begins_with(SK, :sk)',
-      ExpressionAttributeValues: { ':pk': `PLAYER#${playerId}`, ':sk': 'PAYMENT#' },
+      ExpressionAttributeValues: { ':pk': pk, ':sk': 'CHECKIN#' },
       ScanIndexForward: false,
-      Limit: limit,
-    }),
+    },
+    { cursor: opts.cursor, limit: opts.limit ?? 25, partition: { PK: pk } },
   );
-  return (r.Items ?? []).map(paymentView);
+  return { checkins: r.items.map(checkinView), nextCursor: r.nextCursor };
 }
 
-/** A player's pending payments (raw items, server-side use only). */
+/** A page of the player's payments, newest first (allowlisted fields only). */
+export async function playerPayments(playerId: string, opts: { cursor?: unknown; limit?: number } = {}) {
+  const pk = `PLAYER#${playerId}`;
+  const r = await queryPage(
+    {
+      TableName: TABLE,
+      KeyConditionExpression: 'PK = :pk AND begins_with(SK, :sk)',
+      ExpressionAttributeValues: { ':pk': pk, ':sk': 'PAYMENT#' },
+      ScanIndexForward: false,
+    },
+    { cursor: opts.cursor, limit: opts.limit ?? 25, partition: { PK: pk } },
+  );
+  return { payments: r.items.map(paymentView), nextCursor: r.nextCursor };
+}
+
+/**
+ * A player's pending payments (raw items, server-side use only). Read from the
+ * club-wide pending queue, which stays small, rather than the player's whole
+ * payment history, which only grows.
+ */
 export async function pendingPaymentsOf(playerId: string): Promise<Payment[]> {
-  const r = await ddb.send(
-    new QueryCommand({
-      TableName: TABLE,
-      KeyConditionExpression: 'PK = :pk AND begins_with(SK, :sk)',
-      FilterExpression: '#s = :p',
-      ExpressionAttributeNames: { '#s': 'status' },
-      ExpressionAttributeValues: { ':pk': `PLAYER#${playerId}`, ':sk': 'PAYMENT#', ':p': 'pending' },
-    }),
-  );
-  return (r.Items ?? []) as Payment[];
+  return queryAll<Payment>({
+    TableName: TABLE,
+    IndexName: GSI1,
+    KeyConditionExpression: 'GSI1PK = :pk',
+    FilterExpression: 'playerId = :p',
+    ExpressionAttributeValues: { ':pk': 'PAYMENT_STATUS#pending', ':p': playerId },
+  });
 }
 
 // ─────────────────────────── Kiosk PIN lockout ──────────────────────────────
@@ -484,15 +587,13 @@ export async function deleteKiosk(deviceId: string): Promise<boolean> {
 export async function listKiosks(): Promise<
   Array<{ deviceId: string; label: string; active: boolean; lastSeenAt?: string }>
 > {
-  const r = await ddb.send(
-    new QueryCommand({
-      TableName: TABLE,
-      IndexName: GSI1,
-      KeyConditionExpression: 'GSI1PK = :pk',
-      ExpressionAttributeValues: { ':pk': 'KIOSK' },
-    }),
-  );
-  return (r.Items ?? []).map((i: any) => ({
+  const items = await queryAll({
+    TableName: TABLE,
+    IndexName: GSI1,
+    KeyConditionExpression: 'GSI1PK = :pk',
+    ExpressionAttributeValues: { ':pk': 'KIOSK' },
+  });
+  return items.map((i: any) => ({
     deviceId: i.deviceId,
     label: i.label,
     active: i.active,

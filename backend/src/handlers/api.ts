@@ -21,7 +21,9 @@ import {
 import {
   getPlayer,
   getPlayerByCognitoSub,
-  listPlayers,
+  listPlayersPage,
+  negativeFlags,
+  checkinStats,
   listAdmins,
   getAdmin,
   createPlayer,
@@ -48,6 +50,7 @@ import { ddb, TABLE, keys } from '../lib/ddb.js';
 import { GetCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
 import { verifySecret, hashSecret, hashToken, verifyToken } from '../lib/crypto.js';
 import { cleanEmail, cleanName, isId, isPin } from '../lib/text.js';
+import { BadCursor, pageLimit } from '../lib/page.js';
 import type { Player } from '../lib/types.js';
 import {
   AMOUNTS,
@@ -55,7 +58,7 @@ import {
   createCardPayment,
   syncCardPayment,
   getPayment,
-  listPending,
+  listPendingPage,
   adminSettle,
   PaymentRefused,
   reverseCardPayment,
@@ -199,6 +202,7 @@ export const handler = async (
   } catch (err) {
     if (err instanceof StripeNotConfigured) return json(503, { error: err.message });
     if (err instanceof PaymentRefused) return json(409, { error: err.message });
+    if (err instanceof BadCursor) return badRequest(err.message);
     console.error('handler error', err);
     return serverError();
   }
@@ -321,11 +325,14 @@ async function kioskRouter(
     return { player };
   }
 
-  // GET /kiosk/players — picker list. Only a negative-balance flag, no amounts.
+  // GET /kiosk/players?cursor= — picker list, A–Z, one page at a time (the kiosk
+  // follows nextCursor). Only a negative-balance flag, no amounts.
   if (path === '/kiosk/players' && m === 'GET') {
-    const players = await listPlayers();
+    const qs = event.queryStringParameters ?? {};
+    const r = await listPlayersPage(qs.cursor, pageLimit(qs.limit, 200, 500));
     return ok({
-      players: players.map((p) => ({ playerId: p.playerId, name: p.name, negative: p.balanceCents < 0 })),
+      players: r.players.map((p) => ({ playerId: p.playerId, name: p.name, negative: p.balanceCents < 0 })),
+      nextCursor: r.nextCursor,
     });
   }
 
@@ -333,11 +340,9 @@ async function kioskRouter(
   if (path === '/kiosk/session' && m === 'GET') {
     const session = await currentSession();
     if (!session) return ok({ session: null, attendees: [] });
-    const [attendees, players] = await Promise.all([
-      sessionAttendees(session.sessionId),
-      listPlayers(),
-    ]);
-    const negative = new Map(players.map((p) => [p.playerId, p.balanceCents < 0]));
+    const attendees = await sessionAttendees(session.sessionId);
+    // Only the attendees' balances, not every player's.
+    const negative = await negativeFlags(attendees.map((a) => a.playerId));
     return ok({
       session,
       attendees: attendees.map((a) => ({
@@ -623,20 +628,35 @@ async function apiRouter(
   if (path === '/api/me/balance' && m === 'GET') {
     const player = await getPlayerByCognitoSub(claims.sub);
     if (!player) return notFound("We couldn’t find your player profile. Sign out and back in, or ask an admin.");
-    const [checkins, payments, passes] = await Promise.all([
+    // First page of each history list; more via /api/me/checkins and /api/me/payments.
+    const [c, p, passes, stats] = await Promise.all([
       playerCheckins(player.playerId),
       playerPayments(player.playerId),
       playerPasses(player.playerId),
+      checkinStats(player),
     ]);
     return ok({
       playerId: player.playerId,
       name: player.name,
       balanceCents: player.balanceCents,
       owes: player.balanceCents < 0 ? -player.balanceCents : 0,
-      checkins,
-      payments,
+      checkins: c.checkins,
+      checkinsCursor: c.nextCursor,
+      payments: p.payments,
+      paymentsCursor: p.nextCursor,
+      checkinCount: stats.checkinCount,
+      checkinsByMonth: stats.byMonth,
       passes: passes.map(passView),
     });
+  }
+
+  // GET /api/me/checkins?cursor=  /  GET /api/me/payments?cursor= — older history
+  if ((path === '/api/me/checkins' || path === '/api/me/payments') && m === 'GET') {
+    const player = await getPlayerByCognitoSub(claims.sub);
+    if (!player) return notFound("We couldn’t find your player profile. Sign out and back in, or ask an admin.");
+    const qs = event.queryStringParameters ?? {};
+    const opts = { cursor: qs.cursor, limit: pageLimit(qs.limit, 25, 100) };
+    return ok(path === '/api/me/checkins' ? await playerCheckins(player.playerId, opts) : await playerPayments(player.playerId, opts));
   }
 
   // GET /api/me/session — the open session and this player's status in it
@@ -830,9 +850,16 @@ async function apiRouter(
   // ── Admin-only below ──
   if (!admin) return forbidden('Only admins can do this');
 
-  // GET /api/admin/players — with each player's pass for the current period
+  // GET /api/admin/players?cursor= — a page of players (A–Z) with each one's pass
+  // for the current period. The Admin page follows nextCursor to load them all.
   if (path === '/api/admin/players' && m === 'GET') {
-    const [players, holders, admins] = await Promise.all([listPlayers(), currentPassHolders(), listAdminsDetailed()]);
+    const qs = event.queryStringParameters ?? {};
+    const [page, holders, admins] = await Promise.all([
+      listPlayersPage(qs.cursor, pageLimit(qs.limit, 100, 200)),
+      currentPassHolders(),
+      listAdminsDetailed(),
+    ]);
+    const players = page.players;
     // Admins always have chat access, so they never need approving.
     const adminEmails = new Set(admins.map((a) => a.email?.toLowerCase()).filter(Boolean));
     return ok({
@@ -841,6 +868,7 @@ async function apiRouter(
         isAdmin: !!p.email && adminEmails.has(p.email.toLowerCase()),
         pass: passView(holders.get(p.playerId) ?? null),
       })),
+      nextCursor: page.nextCursor,
       agreementVersions: { waiver: WAIVER.version, rules: RULES.version },
       plans: purchasable(null),
     });
@@ -923,9 +951,21 @@ async function apiRouter(
     return ok({ playerId, balanceCents: balance, note: cleanNote });
   }
 
-  // GET /api/admin/pending — payments awaiting confirmation, with names
+  // GET /api/admin/pending?cursor= — payments awaiting confirmation, with names,
+  // one page at a time (oldest first). Abandoned card checkouts are settled with
+  // Stripe as they're seen, so they don't sit in the queue.
   if (path === '/api/admin/pending' && m === 'GET') {
-    const pending = await listPending();
+    const qs = event.queryStringParameters ?? {};
+    const page = await listPendingPage(qs.cursor, pageLimit(qs.limit, 50, 100));
+    const stale = page.items.filter((p) => p.method === 'card' && Date.parse(p.createdAt) < Date.now() - 40 * 60_000).slice(0, 5);
+    const settledNow = new Set<string>();
+    await Promise.all(
+      stale.map(async (p) => {
+        const st = await syncCardPayment(p.paymentId).catch(() => 'pending');
+        if (st !== 'pending') settledNow.add(p.paymentId);
+      }),
+    );
+    const pending = page.items.filter((p) => !settledNow.has(p.paymentId));
     const playerIds = [...new Set(pending.map((p) => p.playerId))];
     const adminIds = [...new Set(pending.map((p) => p.adminId).filter(Boolean))] as string[];
     const [players, admins] = await Promise.all([
@@ -947,6 +987,7 @@ async function apiRouter(
           adminName: p.adminId ? (aName.get(p.adminId) ?? null) : null,
         }))
         .sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
+      nextCursor: page.nextCursor,
     });
   }
 
@@ -965,8 +1006,10 @@ async function apiRouter(
   // GET /api/admin/sessions — every session, newest first
   if (path === '/api/admin/sessions' && m === 'GET') {
     const now = new Date().toISOString();
-    const sessions = await listSessions();
+    const qs = event.queryStringParameters ?? {};
+    const { sessions, nextCursor } = await listSessions({ cursor: qs.cursor, limit: pageLimit(qs.limit, 25, 100) });
     return ok({
+      nextCursor,
       sessions: sessions.map((s) => ({
         ...s,
         open: isOpen(s, now),

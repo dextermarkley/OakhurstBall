@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import QRCode from 'qrcode';
 import { useForm } from 'react-hook-form';
@@ -354,10 +354,37 @@ function SessionsTab() {
     }
   }
 
+  // The newest page refreshes every 20 s; older pages are added by "Load older"
+  // and kept across refreshes.
+  const [older, setOlder] = useState<AdminSession[]>([]);
+  const [olderCursor, setOlderCursor] = useState<string | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const loadedOlder = useRef(false);
+  async function loadMore() {
+    if (!olderCursor) return;
+    setLoadingMore(true);
+    try {
+      const r = await api.sessions(olderCursor);
+      loadedOlder.current = true;
+      setOlder((o) => [...o, ...r.sessions]);
+      setOlderCursor(r.nextCursor);
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setLoadingMore(false);
+    }
+  }
+  const shown = useMemo(() => {
+    const first = sessions ?? [];
+    const seen = new Set(first.map((x) => x.sessionId));
+    return [...first, ...older.filter((x) => !seen.has(x.sessionId))];
+  }, [sessions, older]);
+
   const load = useCallback(async () => {
     try {
       const r = await api.sessions();
       setSessions(r.sessions);
+      if (!loadedOlder.current) setOlderCursor(r.nextCursor);
       const open = r.sessions.find((s) => s.open);
       setCurrent(open ? await api.sessionDetail(open.sessionId) : null);
     } catch (e: any) {
@@ -508,7 +535,7 @@ function SessionsTab() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {(sessions ?? []).map((s) => (
+                {shown.map((s) => (
                   <TableRow key={s.sessionId} className="cursor-pointer" onClick={() => view(s)}>
                     <TableCell className="font-medium">{longDateOf(s.openedAt)}</TableCell>
                     <TableCell className="text-muted-foreground">
@@ -523,6 +550,13 @@ function SessionsTab() {
                 ))}
               </TableBody>
             </Table>
+          )}
+          {olderCursor && (
+            <div className="mt-3 flex justify-center">
+              <Button variant="outline" size="sm" disabled={loadingMore} onClick={loadMore}>
+                {loadingMore && <Spinner />} Load older sessions
+              </Button>
+            </div>
           )}
         </CardContent>
       </Card>

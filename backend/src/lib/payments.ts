@@ -5,8 +5,9 @@
 //          or webhook — whichever arrives first; the rest are no-ops)
 // Settling is one DynamoDB transaction conditioned on status = pending, so a
 // payment can never be credited twice.
-import { TransactWriteCommand, GetCommand, QueryCommand, UpdateCommand, DeleteCommand } from '@aws-sdk/lib-dynamodb';
+import { TransactWriteCommand, GetCommand, UpdateCommand, DeleteCommand } from '@aws-sdk/lib-dynamodb';
 import { ddb, TABLE, GSI1, keys, gsi, sha256 } from './ddb.js';
+import { queryAll, queryPage } from './page.js';
 import { makeToken, newId } from './crypto.js';
 import { createCheckoutSession, retrieveCheckoutSession } from './stripe.js';
 import { PLAN_PRICES, periodFor, type Plan } from './plans.js';
@@ -543,15 +544,26 @@ export async function reverseCardPayment(paymentId: string, kind: 'refunded' | '
   return true;
 }
 
-/** Admin queue. */
-export async function listPending(): Promise<Payment[]> {
-  const res = await ddb.send(
-    new QueryCommand({
+/** One page of the admin queue, newest first. */
+export async function listPendingPage(cursor: unknown, limit: number) {
+  return queryPage<Payment>(
+    {
       TableName: TABLE,
       IndexName: GSI1,
       KeyConditionExpression: 'GSI1PK = :pk',
       ExpressionAttributeValues: { ':pk': 'PAYMENT_STATUS#pending' },
-    }),
+      ScanIndexForward: false,
+    },
+    { cursor, limit, partition: { GSI1PK: 'PAYMENT_STATUS#pending' } },
   );
-  return (res.Items ?? []) as Payment[];
+}
+
+/** The whole admin queue (server-side use). */
+export async function listPending(): Promise<Payment[]> {
+  return queryAll<Payment>({
+    TableName: TABLE,
+    IndexName: GSI1,
+    KeyConditionExpression: 'GSI1PK = :pk',
+    ExpressionAttributeValues: { ':pk': 'PAYMENT_STATUS#pending' },
+  });
 }

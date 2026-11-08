@@ -12,6 +12,8 @@ export const ddb = DynamoDBDocumentClient.from(base, {
 
 export const TABLE = process.env.TABLE_NAME!;
 export const GSI1 = process.env.GSI1_NAME ?? 'GSI1';
+/** cognitoSub → item key (KEYS_ONLY, sparse: only items that have a cognitoSub). */
+export const BY_SUB = 'BySub';
 
 // ── Key builders — the single source of truth for the table layout. ──────────
 export const keys = {

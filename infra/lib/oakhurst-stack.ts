@@ -99,6 +99,13 @@ export class OakhurstStack extends cdk.Stack {
       sortKey: { name: 'GSI1SK', type: dynamodb.AttributeType.STRING },
       projectionType: dynamodb.ProjectionType.ALL,
     });
+    // Cognito account → player/admin key, for the per-request "who is this?" lookup.
+    // Sparse (only items with a cognitoSub) and keys-only, so it stays tiny.
+    table.addGlobalSecondaryIndex({
+      indexName: 'BySub',
+      partitionKey: { name: 'cognitoSub', type: dynamodb.AttributeType.STRING },
+      projectionType: dynamodb.ProjectionType.KEYS_ONLY,
+    });
 
     // ───────────────────────────── Cognito ───────────────────────────────────
     // Admin + Player are real Cognito users, separated by group. Free < 10k MAU.

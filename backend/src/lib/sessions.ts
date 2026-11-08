@@ -8,8 +8,9 @@
 //   SESSION#<id> / META            the session; GSI1PK=SESSION for the history list
 //   SESSION#<id> / ATTEND#<pid>    one per attendee (its condition = once per session)
 //   PLAYER#<pid> / CHECKIN#<iso>   the player's own attendance history
-import { GetCommand, QueryCommand, TransactWriteCommand } from '@aws-sdk/lib-dynamodb';
+import { GetCommand, TransactWriteCommand } from '@aws-sdk/lib-dynamodb';
 import { ddb, TABLE, GSI1, keys } from './ddb.js';
+import { queryAll, queryPage } from './page.js';
 import { newId } from './crypto.js';
 import { clubDate, getPlayer } from './repo.js';
 import { coveringPass, type Pass } from './passes.js';
@@ -159,30 +160,30 @@ export async function closeSession(sessionId: string): Promise<'closed' | 'alrea
   }
 }
 
-/** All sessions, newest first. */
-export async function listSessions(limit = 200): Promise<Session[]> {
-  const r = await ddb.send(
-    new QueryCommand({
+/** A page of sessions, newest first. */
+export async function listSessions(opts: { cursor?: unknown; limit?: number } = {}) {
+  const r = await queryPage(
+    {
       TableName: TABLE,
       IndexName: GSI1,
       KeyConditionExpression: 'GSI1PK = :pk',
       ExpressionAttributeValues: { ':pk': 'SESSION' },
       ScanIndexForward: false,
-      Limit: limit,
-    }),
+    },
+    { cursor: opts.cursor, limit: opts.limit ?? 25, partition: { GSI1PK: 'SESSION' } },
   );
-  return (r.Items ?? []).map(toSession);
+  return { sessions: r.items.map(toSession), nextCursor: r.nextCursor };
 }
 
+const attendeeItems = (sessionId: string) =>
+  queryAll({
+    TableName: TABLE,
+    KeyConditionExpression: 'PK = :pk AND begins_with(SK, :sk)',
+    ExpressionAttributeValues: { ':pk': `SESSION#${sessionId}`, ':sk': 'ATTEND#' },
+  });
+
 export async function sessionAttendees(sessionId: string): Promise<Attendee[]> {
-  const r = await ddb.send(
-    new QueryCommand({
-      TableName: TABLE,
-      KeyConditionExpression: 'PK = :pk AND begins_with(SK, :sk)',
-      ExpressionAttributeValues: { ':pk': `SESSION#${sessionId}`, ':sk': 'ATTEND#' },
-    }),
-  );
-  return (r.Items ?? [])
+  return (await attendeeItems(sessionId))
     .map((i: any) => ({
       playerId: i.playerId,
       name: i.name,
@@ -283,9 +284,11 @@ export async function sessionCheckIn(
             Update: {
               TableName: TABLE,
               Key: keys.playerProfile(player.playerId),
-              UpdateExpression: 'ADD balanceCents :fee SET updatedAt = :now',
+              // checkinCount: all-time total for the player page (see checkinStats).
+              UpdateExpression: 'ADD balanceCents :fee, checkinCount :one SET updatedAt = :now',
               ConditionExpression: balanceCondition,
               ExpressionAttributeValues: {
+                ':one': 1,
                 ':fee': -feeCents,
                 ':now': at,
                 ...(noCheck ? {} : { ':min': minBalanceCents }),
@@ -412,14 +415,7 @@ export async function setFreeDay(
   let refunded = 0;
   let refundedCents = 0;
   if (free) {
-    const r = await ddb.send(
-      new QueryCommand({
-        TableName: TABLE,
-        KeyConditionExpression: 'PK = :pk AND begins_with(SK, :sk)',
-        ExpressionAttributeValues: { ':pk': `SESSION#${sessionId}`, ':sk': 'ATTEND#' },
-      }),
-    );
-    for (const a of r.Items ?? []) {
+    for (const a of await attendeeItems(sessionId)) {
       const fee = (a as any).feeCents ?? 0;
       if (!fee) continue;
       try {

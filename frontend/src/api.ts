@@ -35,6 +35,27 @@ async function req<T>(path: string, init: RequestInit = {}, extraHeaders: Record
   return res.json() as Promise<T>;
 }
 
+/** `path` with ?cursor= added. */
+const withCursor = (path: string, cursor?: string | null) =>
+  cursor ? `${path}${path.includes('?') ? '&' : '?'}cursor=${encodeURIComponent(cursor)}` : path;
+
+/**
+ * Follow a paginated list endpoint to the end: fetch page after page while the
+ * server returns a nextCursor, merging `key`'s items. Capped so a server bug
+ * can't loop forever.
+ */
+async function allPages<T>(fetchPage: (cursor?: string | null) => Promise<T>, key: string, maxPages = 50): Promise<T> {
+  const first: any = await fetchPage();
+  const items: unknown[] = [...(first[key] ?? [])];
+  let cursor: string | null | undefined = first.nextCursor;
+  for (let i = 1; cursor && i < maxPages; i++) {
+    const next: any = await fetchPage(cursor);
+    items.push(...(next[key] ?? []));
+    cursor = next.nextCursor;
+  }
+  return { ...first, [key]: items, nextCursor: null } as T;
+}
+
 // ── Authenticated (player / admin) ──
 export const api = {
   async me() {
@@ -42,6 +63,13 @@ export const api = {
   },
   async myBalance() {
     return req<any>('/api/me/balance', { headers: await authHeaders() });
+  },
+  /** Older history pages (the first page comes with myBalance). */
+  async myCheckins(cursor: string) {
+    return req<{ checkins: any[]; nextCursor: string | null }>(withCursor('/api/me/checkins', cursor), { headers: await authHeaders() });
+  },
+  async myPayments(cursor: string) {
+    return req<{ payments: any[]; nextCursor: string | null }>(withCursor('/api/me/payments', cursor), { headers: await authHeaders() });
   },
   // announcement + RSVP
   async announcement() {
@@ -181,8 +209,10 @@ export const api = {
     });
   },
   // admin
+  /** Every player (the server sends them a page at a time). */
   async adminPlayers() {
-    return req<any>('/api/admin/players', { headers: await authHeaders() });
+    const h = await authHeaders();
+    return allPages((c) => req<any>(withCursor('/api/admin/players', c), { headers: h }), 'players');
   },
   async createPlayer(p: { name: string; email?: string; phone?: string; pin?: string }) {
     return req('/api/admin/players', {
@@ -205,8 +235,10 @@ export const api = {
       body: JSON.stringify({ amountCents }),
     });
   },
+  /** The whole pending queue (paged on the server). */
   async pending() {
-    return req<any>('/api/admin/pending', { headers: await authHeaders() });
+    const h = await authHeaders();
+    return allPages((c) => req<any>(withCursor('/api/admin/pending', c), { headers: h }), 'pending');
   },
   async admins() {
     return req<any>('/api/admin/admins', { headers: await authHeaders() });
@@ -294,8 +326,11 @@ export const api = {
     });
   },
   // sessions
-  async sessions() {
-    return req<{ sessions: AdminSession[] }>('/api/admin/sessions', { headers: await authHeaders() });
+  /** A page of sessions, newest first; pass nextCursor for older ones. */
+  async sessions(cursor?: string | null) {
+    return req<{ sessions: AdminSession[]; nextCursor: string | null }>(withCursor('/api/admin/sessions', cursor), {
+      headers: await authHeaders(),
+    });
   },
   async openSession(free = false) {
     return req<{ session: Session }>('/api/admin/sessions', {
@@ -509,11 +544,16 @@ function kioskHeaders(): Record<string, string> {
 }
 
 export const kiosk = {
+  /** Every player for the picker (the server sends them a page at a time). */
   async players() {
-    return req<{ players: Array<{ playerId: string; name: string; negative: boolean }> }>(
-      '/api/kiosk/players',
-      {},
-      kioskHeaders(),
+    return allPages(
+      (c) =>
+        req<{ players: Array<{ playerId: string; name: string; negative: boolean }>; nextCursor: string | null }>(
+          withCursor('/api/kiosk/players', c),
+          {},
+          kioskHeaders(),
+        ),
+      'players',
     );
   },
   async session() {
