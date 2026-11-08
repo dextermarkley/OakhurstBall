@@ -165,7 +165,7 @@ function UserMenu({ user, onSignOut }: { user: ShellUser; onSignOut: () => void 
         </DropdownMenuItem>
         <DropdownMenuSeparator />
         {updateReady ? (
-          <DropdownMenuItem onClick={applyUpdate}>
+          <DropdownMenuItem onClick={() => void applyUpdate()}>
             <RefreshCw /> Update to the new version
           </DropdownMenuItem>
         ) : null}

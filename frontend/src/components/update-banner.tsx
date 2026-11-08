@@ -1,7 +1,8 @@
 import { useLocation } from 'react-router-dom';
 import { RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { applyUpdate, useUpdateReady } from '@/pwa';
+import { Spinner } from '@/components/ui/spinner';
+import { applyUpdate, useUpdateReady, useUpdating } from '@/pwa';
 import { useNotifyBarVisible } from '@/notifications';
 import { useInstall } from '@/install';
 import { cn } from '@/lib/utils';
@@ -9,6 +10,7 @@ import { cn } from '@/lib/utils';
 /** Floating "new version" pill. Hidden on the kiosk, which updates itself when idle. */
 export function UpdateBanner() {
   const ready = useUpdateReady();
+  const updating = useUpdating();
   const install = useInstall();
   const barVisible = useNotifyBarVisible() || install.barVisible; // sit above either bottom bar
   const { pathname } = useLocation();
@@ -25,9 +27,9 @@ export function UpdateBanner() {
         role="status"
         className="pointer-events-auto flex items-center gap-3 rounded-full border bg-popover py-1.5 pr-1.5 pl-4 text-sm text-popover-foreground shadow-lg"
       >
-        <span>A new version is available</span>
-        <Button size="sm" className="rounded-full" onClick={applyUpdate}>
-          <RefreshCw /> Update
+        <span>{updating ? 'Getting the latest version…' : 'A new version is available'}</span>
+        <Button size="sm" className="rounded-full" disabled={updating} onClick={() => void applyUpdate()}>
+          {updating ? <Spinner /> : <RefreshCw />} {updating ? 'Updating' : 'Update'}
         </Button>
       </div>
     </div>
