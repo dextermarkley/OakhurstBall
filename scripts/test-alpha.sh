@@ -32,6 +32,8 @@ step() { # name, command...
 }
 
 echo "Testing $SHA on alpha.oakhurst-ball.org (log: $LOG)"
+# Several suites refuse to run while a session is open, so close any first.
+node scripts/close-alpha-session.mjs || { echo "Couldn't close the open alpha session"; exit 1; }
 step unit-backend  sh -c 'cd backend && npm test'
 step unit-frontend sh -c 'cd frontend && npm test'
 # live-cash is left out on purpose: it notifies a real admin and waits for them.

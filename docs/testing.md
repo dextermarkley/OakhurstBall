@@ -9,6 +9,8 @@ scripts/test-alpha.sh                        # everything, ~15 min; records the 
 scripts/promote.sh --approved-by-dexter <sha>   # refuses unless that commit passed
 ```
 
+`scripts/test-alpha.sh` first closes any session open on alpha (`scripts/close-alpha-session.mjs`), since several suites refuse to run while one is open.
+
 `scripts/test-alpha.sh --quick` runs the unit and API suites only (no browser); it
 does not count for promotion. Output goes to `test-results/alpha-<sha>.log`; the
 browser report (screenshots and traces of failures) opens with
