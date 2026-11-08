@@ -287,7 +287,9 @@ export class OakhurstStack extends cdk.Stack {
     // cost instead of scaling without limit (the account allows 1000).
     for (const [fn, n] of [
       [apiFn, prod ? 40 : 10],
-      [webFn, prod ? 20 : 5],
+      // The site Lambda serves every page's ~25 script/style files at once, and a
+      // cold page load needs one instance per parallel file: keep plenty here.
+      [webFn, prod ? 100 : 50],
       [confirmFn, prod ? 10 : 3],
       [postAuthFn, prod ? 10 : 3],
     ] as const) {
@@ -400,6 +402,8 @@ export class OakhurstStack extends cdk.Stack {
     // routeSettings is raw JSON, so the keys use the CloudFormation casing.
     const limit = (rate: number, burst: number) => ({ ThrottlingRateLimit: rate, ThrottlingBurstLimit: burst });
     apiStage.routeSettings = {
+      // The site itself (HTML, JS, CSS, icons): one page load is ~25 requests.
+      $default: limit(200, 400),
       'GET /api/kiosk/{proxy+}': limit(10, 20),
       'POST /api/kiosk/{proxy+}': limit(3, 10),
       'GET /api/confirm/{proxy+}': limit(2, 5),
