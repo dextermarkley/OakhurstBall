@@ -495,10 +495,11 @@ function MessageList({
               </button>
               <button
                 type="button"
+                aria-label="Reply"
                 onClick={() => onReply(m)}
-                className="ml-0.5 flex h-9 items-center gap-1 rounded-full px-3 text-sm font-medium hover:bg-muted"
+                className="flex h-9 min-w-9 shrink-0 items-center justify-center gap-1 rounded-full px-2 text-sm font-medium hover:bg-muted sm:px-3"
               >
-                <Reply className="size-4" /> Reply
+                <Reply className="size-4" /> <span className="hidden sm:inline">Reply</span>
               </button>
             </div>
           )}
