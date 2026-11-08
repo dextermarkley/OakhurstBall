@@ -52,6 +52,7 @@ import { GetCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
 import { verifySecret, hashSecret, hashToken, verifyToken } from '../lib/crypto.js';
 import { cleanEmail, cleanName, isId, isPin } from '../lib/text.js';
 import { checkContact, hasContact, normalizePhone } from '../lib/contact.js';
+import { adminSubs, setPlayerAdmin } from '../lib/admins.js';
 import { BadCursor, pageLimit } from '../lib/page.js';
 import type { Player } from '../lib/types.js';
 import {
@@ -891,15 +892,14 @@ async function apiRouter(
     const [page, holders, admins] = await Promise.all([
       listPlayersPage(qs.cursor, pageLimit(qs.limit, 100, 200)),
       currentPassHolders(),
-      listAdminsDetailed(),
+      adminSubs(),
     ]);
-    const players = page.players;
-    // Admins always have chat access, so they never need approving.
-    const adminEmails = new Set(admins.map((a) => a.email?.toLowerCase()).filter(Boolean));
+    // isAdmin: in the Cognito admin group (what the API checks). isMe: the caller.
     return ok({
-      players: players.map((p) => ({
+      players: page.players.map(({ cognitoSub, ...p }) => ({
         ...p,
-        isAdmin: !!p.email && adminEmails.has(p.email.toLowerCase()),
+        isAdmin: !!cognitoSub && admins.has(cognitoSub),
+        isMe: !!cognitoSub && cognitoSub === claims.sub,
         pass: passView(holders.get(p.playerId) ?? null),
       })),
       nextCursor: page.nextCursor,
@@ -948,6 +948,29 @@ async function apiRouter(
       approved: true, // added by an admin, so already vouched for
     });
     return created({ player: { playerId: player.playerId, name: player.name } });
+  }
+
+  // POST /api/admin/players/{id}/admin { admin: boolean } — make someone an admin, or not
+  const adminMatch = path.match(/^\/api\/admin\/players\/([a-f0-9]{24})\/admin$/);
+  if (adminMatch && m === 'POST') {
+    const { admin: on } = parseBody(event);
+    if (typeof on !== 'boolean') return badRequest('admin must be true or false');
+    const p = await getPlayer(adminMatch[1]);
+    if (!p) return notFound('Player not found');
+    const r = await setPlayerAdmin(p, on, { sub: claims.sub });
+    if (r === 'no_account') return badRequest(`${p.name} needs to sign up for an account before they can be an admin`);
+    if (r === 'self') return badRequest('You can’t remove your own admin access. Ask another admin.');
+    if (r === 'last_admin') return badRequest('The club needs at least one admin');
+    console.log('admin access changed', { playerId: p.playerId, admin: on, by: claims.sub });
+    if (on && p.cognitoSub) {
+      await sendPush(toUser(p.cognitoSub), {
+        title: 'You’re an admin',
+        body: 'You can now open the gym, confirm cash and manage players. Sign out and back in to see the Admin page.',
+        url: '/admin',
+        tag: 'made-admin',
+      });
+    }
+    return ok({ admin: on });
   }
 
   // POST /api/admin/players/{id}/approve { approved: boolean } — members-only access (chat)

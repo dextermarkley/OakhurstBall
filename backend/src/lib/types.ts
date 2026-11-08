@@ -101,6 +101,7 @@ export interface PublicPlayer {
   createdAt?: string;
   /** Signed up with an account (vs. added by an admin for the kiosk). */
   hasAccount?: boolean;
+  cognitoSub?: string;
   phone?: string;
   emergencyName?: string;
   emergencyPhone?: string;

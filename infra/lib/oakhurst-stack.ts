@@ -322,6 +322,21 @@ export class OakhurstStack extends cdk.Stack {
         resources: [`arn:aws:ssm:${this.region}:${this.account}:parameter/${P}/stripe/*`],
       }),
     );
+    // Admin → Players can make someone an admin (or not): the api Lambda manages
+    // membership of the Cognito 'admin' group, and nothing else in the pool.
+    apiFn.addEnvironment('USER_POOL_ID', userPool.userPoolId);
+    apiFn.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: [
+          'cognito-idp:AdminAddUserToGroup',
+          'cognito-idp:AdminRemoveUserFromGroup',
+          'cognito-idp:AdminUserGlobalSignOut',
+          'cognito-idp:ListUsersInGroup',
+        ],
+        resources: [userPool.userPoolArn],
+      }),
+    );
+
     // Key that encrypts and signs pagination cursors (lib/page.ts). Created
     // outside CDK, like the Stripe and push keys: 32 random bytes, hex.
     apiFn.addEnvironment('CURSOR_KEY_PARAM', `/${P}/cursor/key`);

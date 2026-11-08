@@ -25,6 +25,7 @@ import {
   UserPlus,
   UserX,
   Users,
+  ShieldOff,
 } from 'lucide-react';
 import { api, type AdminSession, type Attendee, type Plan, type PlanOffer } from '@/api';
 import { AppShell, PageHeader } from '@/components/app-shell';
@@ -703,6 +704,33 @@ function PlayersTab() {
   // Self sign-ups waiting for an admin (players added by an admin are approved already).
   const pending = (players ?? []).filter((p) => p.hasAccount && !p.approved && !p.isAdmin);
 
+  async function setAdmin(p: any, admin: boolean) {
+    const ok = await confirm(
+      admin
+        ? {
+            title: `Make ${p.name} an admin?`,
+            description:
+              'They’ll be able to open and close the gym, confirm cash, charge and credit players, post announcements, and make or remove other admins. Players will also be able to hand them cash.',
+            confirmLabel: 'Make admin',
+          }
+        : {
+            title: `Remove ${p.name} as an admin?`,
+            description:
+              'They keep their player account, balance and chat access, but lose the Admin page right away and are signed out on their devices. Players can no longer pick them for cash.',
+            confirmLabel: 'Remove admin',
+            destructive: true,
+          },
+    );
+    if (!ok) return;
+    try {
+      await api.setPlayerAdmin(p.playerId, admin);
+      toast.success(admin ? `${p.name} is now an admin.` : `${p.name} is no longer an admin.`);
+      load();
+    } catch (e: any) {
+      toast.error(e.message);
+    }
+  }
+
   async function approve(p: any, approved: boolean) {
     if (!approved) {
       const ok = await confirm({
@@ -832,6 +860,11 @@ function PlayersTab() {
                             {p.agreedAt ? 'Waiver outdated' : 'No waiver'}
                           </Badge>
                         )}
+                        {p.isAdmin && (
+                          <Badge variant="outline" className="border-primary/40 text-primary">
+                            <ShieldCheck /> Admin
+                          </Badge>
+                        )}
                         {p.hasAccount && !p.approved && !p.isAdmin && (
                           <Badge variant="outline" className="text-muted-foreground" title="Can’t use the chat until approved">
                             Not approved
@@ -864,7 +897,24 @@ function PlayersTab() {
                           <DropdownMenuItem onClick={() => setCharging(p)}>
                             <Banknote /> Charge…
                           </DropdownMenuItem>
+                          {p.isAdmin ? (
+                            !p.isMe && (
+                              <DropdownMenuItem onClick={() => setAdmin(p, false)}>
+                                <ShieldOff /> Remove admin
+                              </DropdownMenuItem>
+                            )
+                          ) : p.hasAccount ? (
+                            <DropdownMenuItem onClick={() => setAdmin(p, true)}>
+                              <ShieldCheck /> Make admin
+                            </DropdownMenuItem>
+                          ) : (
+                            <DropdownMenuItem disabled>
+                              <ShieldCheck /> Make admin
+                              <span className="ml-auto text-xs text-muted-foreground">needs an account</span>
+                            </DropdownMenuItem>
+                          )}
                           {p.hasAccount &&
+                            !p.isAdmin &&
                             (p.approved ? (
                               <DropdownMenuItem onClick={() => approve(p, false)}>
                                 <UserX /> Remove chat access

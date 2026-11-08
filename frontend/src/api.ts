@@ -333,6 +333,13 @@ export const api = {
       body: JSON.stringify({ approved }),
     });
   },
+  async setPlayerAdmin(playerId: string, admin: boolean) {
+    return req<{ admin: boolean }>(`/api/admin/players/${playerId}/admin`, {
+      method: 'POST',
+      headers: await authHeaders(),
+      body: JSON.stringify({ admin }),
+    });
+  },
   async deleteKiosk(deviceId: string) {
     return req<{ removed: boolean }>(`/api/admin/kiosks/${encodeURIComponent(deviceId)}`, {
       method: 'DELETE',

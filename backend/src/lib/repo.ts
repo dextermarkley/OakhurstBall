@@ -115,6 +115,7 @@ const publicPlayer = (i: any): PublicPlayer => ({
   email: i.email,
   createdAt: i.createdAt,
   hasAccount: !!i.cognitoSub,
+  cognitoSub: i.cognitoSub, // server-side use (stripped before admin pages get it)
   // Contact details: admin pages only (the kiosk maps players to id/name/flag).
   phone: i.phone,
   emergencyName: i.emergencyName,
