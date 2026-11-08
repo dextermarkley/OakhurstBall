@@ -163,7 +163,7 @@ export function SignScreen({
             </CardHeader>
             <CardContent className="space-y-4">
               <RulesList doc={s.rules} />
-              <CheckRow control={form.control} name="agreeRules" label="I’ve read the club rules and I’ll follow them." />
+              <CheckRow control={form.control} name="agreeRules" label="I’ve read the Club Rules and Play Rules, and I’ll follow them." />
             </CardContent>
           </Card>
 
@@ -261,10 +261,20 @@ function RulesList({ doc, compact }: { doc: AgreementDoc; compact?: boolean }) {
     else groups.push({ heading: s.heading, items: [s.body] });
   }
   return (
-    <div className={compact ? 'space-y-3' : 'space-y-4'}>
+    <div className={compact ? 'space-y-3' : 'space-y-6'}>
       {groups.map((g, gi) => (
         <div key={gi}>
-          {g.heading && <h3 className="mb-2 text-sm font-semibold">{g.heading}</h3>}
+          {g.heading && (
+            <h3
+              className={cn(
+                'mb-2 flex items-center gap-2 font-semibold',
+                compact ? 'text-sm' : 'border-b pb-1.5 text-base text-foreground',
+              )}
+            >
+              <span className="h-4 w-1 rounded-full bg-brand" aria-hidden />
+              {g.heading}
+            </h3>
+          )}
           <ol className={cn('text-sm', compact ? 'space-y-1 text-muted-foreground' : 'space-y-2')}>
             {g.items.map((body, i) => (
               <li key={i} className={compact ? '' : 'rounded-lg bg-muted/50 px-3 py-2'}>
