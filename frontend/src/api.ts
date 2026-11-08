@@ -139,12 +139,19 @@ export const api = {
     });
   },
   async chatPoll(after: string, since: string) {
-    return req<{ messages: ChatMessage[]; deleted: string[]; now: string }>(
+    return req<{ messages: ChatMessage[]; deleted: string[]; updated?: ChatMessage[]; now: string }>(
       `/api/chat?after=${encodeURIComponent(after)}&since=${encodeURIComponent(since)}`,
       { headers: await authHeaders() },
     );
   },
-  async chatSend(m: { text?: string; imageKey?: string; width?: number; height?: number }) {
+  async chatReact(cursor: string, emoji: string, on: boolean) {
+    return req<{ message: ChatMessage }>('/api/chat/react', {
+      method: 'POST',
+      headers: await authHeaders(),
+      body: JSON.stringify({ cursor, emoji, on }),
+    });
+  },
+  async chatSend(m: { text?: string; imageKey?: string; width?: number; height?: number; replyTo?: string }) {
     return req<{ message: ChatMessage }>('/api/chat', {
       method: 'POST',
       headers: await authHeaders(),
@@ -486,6 +493,10 @@ export interface ChatMessage {
   name: string;
   text?: string;
   image?: { url: string; width?: number; height?: number };
+  /** One entry per emoji; subs = who reacted (compare with mySub). */
+  reactions?: Array<{ emoji: string; subs: string[] }>;
+  /** The message this one replies to, as it was quoted (or deleted since). */
+  replyTo?: { cursor: string; messageId: string; sub: string; name: string; text?: string; image?: boolean; deleted?: boolean };
   createdAt: string;
 }
 

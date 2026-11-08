@@ -122,6 +122,7 @@ import {
   mediaUrl,
   notifyChat,
   postMessage,
+  react,
   setChatNotify,
   uploadTicket,
 } from '../lib/chat.js';
@@ -551,10 +552,20 @@ async function communityRouter(
       imageKey: b.imageKey,
       width: b.width,
       height: b.height,
+      replyTo: b.replyTo,
     });
     if (r.error) return badRequest(r.error);
-    await notifyChat(r.message!).catch((e) => console.error('chat notify failed', e));
+    await notifyChat(r.message!, r.repliedTo).catch((e) => console.error('chat notify failed', e));
     return created({ message: r.message });
+  }
+  // POST /api/chat/react {cursor, emoji, on} — add/remove your reaction
+  if (path === '/api/chat/react' && m === 'POST') {
+    const b = parseBody(event);
+    if (typeof b.on !== 'boolean') return badRequest('on must be true or false');
+    const r = await react(b.cursor, b.emoji, b.on, claims.sub);
+    if (r.error === 'notfound') return notFound('That message was deleted');
+    if (r.error) return badRequest(r.error);
+    return ok({ message: r.message });
   }
   if (path === '/api/chat/upload' && m === 'POST') {
     const { contentType, size } = parseBody(event);

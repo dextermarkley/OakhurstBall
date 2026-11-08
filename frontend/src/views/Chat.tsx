@@ -1,8 +1,10 @@
 // Club chat room: memes, logistics, whatever. Polls every few seconds while it's
 // on screen; people who opt in get a notification for new messages (the server
-// skips anyone who has the chat open).
+// skips anyone who has the chat open). Tap a message for quick reactions and
+// Reply; double-tap to ❤️; hover on a desktop shows the same actions.
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
-import { Bell, BellOff, Hourglass, ImagePlus, Loader2, MessagesSquare, SendHorizontal, Trash2, X } from 'lucide-react';
+import { Bell, BellOff, Hourglass, ImagePlus, Loader2, MessagesSquare, Reply, SendHorizontal, SmilePlus, Trash2, X } from 'lucide-react';
+import { EmojiPicker } from 'frimousse';
 import { toast } from 'sonner';
 import { api, type ChatMessage } from '@/api';
 import { AppShell, type ShellUser } from '@/components/app-shell';
@@ -20,6 +22,8 @@ import { markChatRead } from '@/chat-unread';
 
 const POLL_MS = 4000;
 const MAX_TEXT = 2000;
+const QUICK = ['👍', '❤️', '😂', '🔥', '🏀', '😮'];
+const DOUBLE_TAP = '❤️';
 
 export function Chat() {
   return <AuthGate>{(signOut) => <ChatInner signOut={signOut} />}</AuthGate>;
@@ -48,6 +52,9 @@ function ChatRoom({ isAdmin }: { isAdmin: boolean }) {
   const [notifyHelp, setNotifyHelp] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
   const [viewer, setViewer] = useState<ChatMessage | null>(null);
+  const [replyTo, setReplyTo] = useState<ChatMessage | null>(null);
+  const [pickerFor, setPickerFor] = useState<ChatMessage | null>(null);
+  const [flash, setFlash] = useState<string | null>(null);
   const since = useRef('');
   const listRef = useRef<HTMLDivElement>(null);
   const stick = useRef(true); // keep pinned to the bottom unless the user scrolled up
@@ -73,17 +80,23 @@ function ChatRoom({ isAdmin }: { isAdmin: boolean }) {
     try {
       const r = await api.chatPoll(after, since.current);
       since.current = r.now;
-      if (r.messages.length || r.deleted.length) {
+      const updated = r.updated ?? [];
+      if (r.messages.length || r.deleted.length || updated.length) {
         setMessages((cur) => {
           const gone = new Set(r.deleted);
+          const fresh = new Map(updated.map((m) => [m.messageId, m]));
           const have = new Set((cur ?? []).map((m) => m.messageId));
-          return [...(cur ?? []).filter((m) => !gone.has(m.messageId)), ...r.messages.filter((m) => !have.has(m.messageId))];
+          return [
+            ...(cur ?? []).filter((m) => !gone.has(m.messageId)).map((m) => fresh.get(m.messageId) ?? m),
+            ...r.messages.filter((m) => !have.has(m.messageId)),
+          ];
         });
+        if (replyTo && r.deleted.includes(replyTo.messageId)) setReplyTo(null);
       }
     } catch {
       /* try again next tick */
     }
-  }, [messages]);
+  }, [messages, replyTo]);
 
   useEffect(() => {
     const t = setInterval(poll, POLL_MS);
@@ -126,6 +139,43 @@ function ChatRoom({ isAdmin }: { isAdmin: boolean }) {
     }
   }
 
+  const put = (m: ChatMessage) => setMessages((cur) => (cur ?? []).map((x) => (x.messageId === m.messageId ? m : x)));
+
+  /** Toggle my reaction: shown at once, then replaced by what the server says. */
+  async function toggleReaction(m: ChatMessage, emoji: string) {
+    const cur = m.reactions ?? [];
+    const on = !cur.find((r) => r.emoji === emoji)?.subs.includes(mySub);
+    // Only this emoji changes; my other reactions on the message stay.
+    let next = cur.map((r) => (r.emoji !== emoji ? r : { ...r, subs: on ? [...r.subs, mySub] : r.subs.filter((x) => x !== mySub) }));
+    if (on && !cur.some((r) => r.emoji === emoji)) next = [...next, { emoji, subs: [mySub] }];
+    put({ ...m, reactions: next.filter((r) => r.subs.length) });
+    setSelected(null);
+    try {
+      put((await api.chatReact(m.cursor, emoji, on)).message);
+    } catch (e: any) {
+      put(m);
+      toast.error(e.message);
+    }
+  }
+
+  function startReply(m: ChatMessage) {
+    setReplyTo(m);
+    setSelected(null);
+    document.getElementById('chat-composer')?.focus();
+  }
+
+  /** Scroll to the quoted message and flash it (if it's loaded). */
+  function jumpTo(messageId: string) {
+    const el = document.getElementById(`m-${messageId}`);
+    if (!el) return void toast('That message is further back. Tap “Load earlier messages”.');
+    el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    setFlash(messageId);
+    setTimeout(() => setFlash((f) => (f === messageId ? null : f)), 1500);
+  }
+
+  // Who reacted, by name, for the tooltips (people who've posted in what's loaded).
+  const names = new Map((messages ?? []).map((m) => [m.sub, m.name]));
+
   async function remove(m: ChatMessage) {
     const ok = await confirm({
       title: 'Delete this message?',
@@ -137,6 +187,7 @@ function ChatRoom({ isAdmin }: { isAdmin: boolean }) {
     try {
       await api.chatDelete(m.cursor);
       setMessages((cur) => (cur ?? []).filter((x) => x.messageId !== m.messageId));
+      if (replyTo?.messageId === m.messageId) setReplyTo(null);
     } catch (e: any) {
       toast.error(e.message);
     }
@@ -214,12 +265,75 @@ function ChatRoom({ isAdmin }: { isAdmin: boolean }) {
               onSelect={(id) => setSelected((s) => (s === id ? null : id))}
               onDelete={remove}
               onView={setViewer}
+              onReact={toggleReaction}
+              onReply={startReply}
+              onMore={(m) => {
+                setPickerFor(m);
+                setSelected(null);
+              }}
+              onJump={jumpTo}
+              flash={flash}
+              names={names}
             />
           </>
         )}
       </div>
 
-      {messages && !error && <Composer onSent={onSent} />}
+      {messages && !error && <Composer onSent={onSent} replyTo={replyTo} onCancelReply={() => setReplyTo(null)} mySub={mySub} />}
+
+      <Dialog open={!!pickerFor} onOpenChange={(o) => !o && setPickerFor(null)}>
+        <DialogContent className="w-[min(92vw,360px)] gap-2 p-3">
+          <DialogTitle className="text-sm">React to {pickerFor?.sub === mySub ? 'your message' : `${pickerFor?.name}’s message`}</DialogTitle>
+          <EmojiPicker.Root
+            emojibaseUrl="/emojibase"
+            columns={8}
+            className="flex h-[340px] flex-col"
+            onEmojiSelect={({ emoji }) => {
+              const m = pickerFor;
+              setPickerFor(null);
+              if (m) toggleReaction(m, emoji);
+            }}
+          >
+            <EmojiPicker.Search
+              aria-label="Search emoji"
+              placeholder="Search emoji"
+              className="mb-2 h-9 rounded-lg border bg-background px-3 text-base outline-none focus-visible:ring-3 focus-visible:ring-ring/50 sm:text-sm"
+            />
+            <EmojiPicker.Viewport className="relative flex-1 outline-none">
+              <EmojiPicker.Loading className="absolute inset-0 flex items-center justify-center text-sm text-muted-foreground">
+                Loading…
+              </EmojiPicker.Loading>
+              <EmojiPicker.Empty className="absolute inset-0 flex items-center justify-center text-sm text-muted-foreground">
+                No emoji found.
+              </EmojiPicker.Empty>
+              <EmojiPicker.List
+                className="pb-2 select-none"
+                components={{
+                  CategoryHeader: ({ category, ...props }) => (
+                    <div {...props} className="bg-popover px-1 pt-2 pb-1 text-xs font-medium text-muted-foreground">
+                      {category.label}
+                    </div>
+                  ),
+                  Row: ({ children, ...props }) => (
+                    <div {...props} className="flex">
+                      {children}
+                    </div>
+                  ),
+                  Emoji: ({ emoji, ...props }) => (
+                    <button
+                      {...props}
+                      aria-label={emoji.label}
+                      className={cn('flex size-10 items-center justify-center rounded-lg text-2xl', emoji.isActive && 'bg-muted')}
+                    >
+                      {emoji.emoji}
+                    </button>
+                  ),
+                }}
+              />
+            </EmojiPicker.Viewport>
+          </EmojiPicker.Root>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={!!viewer} onOpenChange={(o) => !o && setViewer(null)}>
         <DialogContent className="max-h-[92dvh] w-auto max-w-[min(96vw,1100px)] p-2 sm:max-w-[min(96vw,1100px)]">
@@ -253,6 +367,12 @@ function MessageList({
   onSelect,
   onDelete,
   onView,
+  onReact,
+  onReply,
+  onMore,
+  onJump,
+  flash,
+  names,
 }: {
   messages: ChatMessage[];
   mySub: string;
@@ -261,6 +381,12 @@ function MessageList({
   onSelect: (id: string) => void;
   onDelete: (m: ChatMessage) => void;
   onView: (m: ChatMessage) => void;
+  onReact: (m: ChatMessage, emoji: string) => void;
+  onReply: (m: ChatMessage) => void;
+  onMore: (m: ChatMessage) => void;
+  onJump: (messageId: string) => void;
+  flash: string | null;
+  names: Map<string, string>;
 }) {
   const out: ReactNode[] = [];
   messages.forEach((m, i) => {
@@ -280,7 +406,11 @@ function MessageList({
     const mine = m.sub === mySub;
     const isSel = selected === m.messageId;
     out.push(
-      <div key={m.messageId} className={cn('group flex gap-2', mine ? 'flex-row-reverse' : 'flex-row', grouped ? 'mt-0.5' : 'mt-3')}>
+      <div
+        key={m.messageId}
+        id={`m-${m.messageId}`}
+        className={cn('group flex gap-2 rounded-xl transition-colors', mine ? 'flex-row-reverse' : 'flex-row', grouped ? 'mt-0.5' : 'mt-3', flash === m.messageId && 'bg-brand/10')}
+      >
         <div className="w-8 shrink-0">
           {!grouped && !mine && (
             <Avatar className="size-8">
@@ -298,12 +428,18 @@ function MessageList({
           <div className={cn('flex items-center gap-1', mine ? 'flex-row-reverse' : 'flex-row')}>
             <div
               onClick={() => onSelect(m.messageId)}
+              onDoubleClick={(e) => {
+                e.preventDefault();
+                onReact(m, DOUBLE_TAP);
+              }}
+              data-testid="bubble"
               className={cn(
-                'min-w-0 overflow-hidden rounded-2xl text-left text-sm',
-                m.text && (mine ? 'bg-primary text-primary-foreground' : 'bg-muted text-foreground'),
+                'min-w-0 cursor-pointer overflow-hidden rounded-2xl text-left text-sm [touch-action:manipulation]',
+                (m.text || m.replyTo) && (mine ? 'bg-primary text-primary-foreground' : 'bg-muted text-foreground'),
                 isSel && 'ring-2 ring-ring/40',
               )}
             >
+              {m.replyTo && <Quote q={m.replyTo} mine={mine} mySub={mySub} onJump={onJump} />}
               {m.image && (
                 <ChatImage
                   m={m}
@@ -315,24 +451,107 @@ function MessageList({
               )}
               {m.text && <div className="px-3.5 py-2 break-words whitespace-pre-wrap">{linkify(m.text, mine)}</div>}
             </div>
-            {(mine || isAdmin) && (
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                aria-label="Delete message"
-                className={cn('shrink-0 text-muted-foreground opacity-0 group-hover:opacity-100 focus-visible:opacity-100', isSel && 'opacity-100')}
-                onClick={() => onDelete(m)}
-              >
-                <Trash2 />
+            <div className={cn('flex shrink-0 opacity-0 group-hover:opacity-100 focus-within:opacity-100', isSel && 'opacity-100', mine && 'flex-row-reverse')}>
+              <Button variant="ghost" size="icon-sm" aria-label="React" className="text-muted-foreground" onClick={() => onSelect(m.messageId)}>
+                <SmilePlus />
               </Button>
-            )}
+              <Button variant="ghost" size="icon-sm" aria-label="Reply" className="text-muted-foreground" onClick={() => onReply(m)}>
+                <Reply />
+              </Button>
+              {(mine || isAdmin) && (
+                <Button variant="ghost" size="icon-sm" aria-label="Delete message" className="text-muted-foreground" onClick={() => onDelete(m)}>
+                  <Trash2 />
+                </Button>
+              )}
+            </div>
           </div>
+          {isSel && (
+            <div
+              role="toolbar"
+              aria-label="Quick reactions"
+              className={cn('mt-1 flex items-center gap-0.5 rounded-full border bg-popover p-1 shadow-md', mine ? 'self-end' : 'self-start')}
+            >
+              {QUICK.map((e) => (
+                <button
+                  key={e}
+                  type="button"
+                  aria-label={`React ${e}`}
+                  onClick={() => onReact(m, e)}
+                  className="flex size-9 items-center justify-center rounded-full text-xl transition active:scale-90 hover:bg-muted"
+                >
+                  {e}
+                </button>
+              ))}
+              <button
+                type="button"
+                aria-label="More reactions"
+                onClick={() => onMore(m)}
+                className="flex size-9 items-center justify-center rounded-full text-muted-foreground hover:bg-muted"
+              >
+                <SmilePlus className="size-5" />
+              </button>
+              <button
+                type="button"
+                onClick={() => onReply(m)}
+                className="ml-0.5 flex h-9 items-center gap-1 rounded-full px-3 text-sm font-medium hover:bg-muted"
+              >
+                <Reply className="size-4" /> Reply
+              </button>
+            </div>
+          )}
+          {!!m.reactions?.length && (
+            <div className={cn('mt-1 flex flex-wrap gap-1', mine ? 'justify-end' : 'justify-start')}>
+              {m.reactions.map((r) => {
+                const me = r.subs.includes(mySub);
+                const who = r.subs.map((s) => (s === mySub ? 'You' : (names.get(s) ?? 'Someone')));
+                return (
+                  <button
+                    key={r.emoji}
+                    type="button"
+                    aria-pressed={me}
+                    aria-label={`${r.emoji} ${r.subs.length}: ${who.join(', ')}`}
+                    title={who.join(', ')}
+                    onClick={() => onReact(m, r.emoji)}
+                    className={cn(
+                      'flex h-7 items-center gap-1 rounded-full border px-2 text-sm transition active:scale-95',
+                      me ? 'border-primary/50 bg-primary/10' : 'bg-background hover:bg-muted',
+                    )}
+                  >
+                    <span className="text-base leading-none">{r.emoji}</span>
+                    <span className="tabular text-xs font-medium">{r.subs.length}</span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
           {isSel && grouped && <div className="mt-0.5 px-1 text-[11px] text-muted-foreground">{timeOf(m.createdAt)}</div>}
         </div>
       </div>,
     );
   });
   return <>{out}</>;
+}
+
+/** The quoted message at the top of a reply. Tap to jump to it. */
+function Quote({ q, mine, mySub, onJump }: { q: NonNullable<ChatMessage['replyTo']>; mine: boolean; mySub: string; onJump: (id: string) => void }) {
+  return (
+    <button
+      type="button"
+      onClick={(e) => {
+        e.stopPropagation();
+        if (!q.deleted) onJump(q.messageId);
+      }}
+      className={cn(
+        'mx-2 mt-2 mb-0 block max-w-full rounded-lg border-l-[3px] px-2.5 py-1 text-left text-xs',
+        mine ? 'border-primary-foreground/60 bg-primary-foreground/10' : 'border-brand/70 bg-background/60',
+      )}
+    >
+      <div className="font-semibold">{q.sub === mySub ? 'You' : q.name}</div>
+      <div className={cn('line-clamp-2', mine ? 'text-primary-foreground/80' : 'text-muted-foreground', q.deleted && 'italic')}>
+        {q.deleted ? 'Deleted message' : (q.text ?? (q.image ? '📷 Photo' : ''))}
+      </div>
+    </button>
+  );
 }
 
 function ChatImage({ m, onOpen }: { m: ChatMessage; onOpen: (e: React.MouseEvent) => void }) {
@@ -407,7 +626,17 @@ async function prepareImage(file: File): Promise<Attachment> {
   return { blob, url: URL.createObjectURL(blob), width: canvas.width, height: canvas.height };
 }
 
-function Composer({ onSent }: { onSent: (m: ChatMessage) => void }) {
+function Composer({
+  onSent,
+  replyTo,
+  onCancelReply,
+  mySub,
+}: {
+  onSent: (m: ChatMessage) => void;
+  replyTo: ChatMessage | null;
+  onCancelReply: () => void;
+  mySub: string;
+}) {
   const [text, setText] = useState('');
   const [att, setAtt] = useState<Attachment | null>(null);
   const [preparing, setPreparing] = useState(false);
@@ -451,9 +680,10 @@ function Composer({ onSent }: { onSent: (m: ChatMessage) => void }) {
     try {
       let imageKey: string | undefined;
       if (att) imageKey = await api.chatUpload(att.blob);
-      const r = await api.chatSend({ text: t || undefined, imageKey, width: att?.width, height: att?.height });
+      const r = await api.chatSend({ text: t || undefined, imageKey, width: att?.width, height: att?.height, replyTo: replyTo?.cursor });
       setText('');
       setAtt(null);
+      onCancelReply();
       onSent(r.message);
       taRef.current?.focus();
     } catch (e: any) {
@@ -479,6 +709,18 @@ function Composer({ onSent }: { onSent: (m: ChatMessage) => void }) {
         attach(e.dataTransfer.files?.[0]);
       }}
     >
+      {replyTo && (
+        <div className="mb-2 flex items-center gap-2 rounded-lg border-l-[3px] border-brand/70 bg-muted/60 py-1.5 pr-1 pl-2.5 text-xs">
+          <Reply className="size-3.5 shrink-0 text-muted-foreground" />
+          <div className="min-w-0 flex-1">
+            <div className="font-semibold">Replying to {replyTo.sub === mySub ? 'yourself' : replyTo.name}</div>
+            <div className="truncate text-muted-foreground">{replyTo.text ?? (replyTo.image ? '📷 Photo' : '')}</div>
+          </div>
+          <Button variant="ghost" size="icon-sm" aria-label="Cancel reply" onClick={onCancelReply}>
+            <X />
+          </Button>
+        </div>
+      )}
       {(att || preparing) && (
         <div className="mb-2 flex items-center gap-2">
           <div className="relative">
@@ -525,6 +767,7 @@ function Composer({ onSent }: { onSent: (m: ChatMessage) => void }) {
         </Button>
         <textarea
           ref={taRef}
+          id="chat-composer"
           rows={1}
           value={text}
           maxLength={MAX_TEXT}
@@ -532,6 +775,7 @@ function Composer({ onSent }: { onSent: (m: ChatMessage) => void }) {
           aria-label="Message"
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => {
+            if (e.key === 'Escape' && replyTo) onCancelReply();
             // Enter sends on a keyboard; Shift+Enter (and phones) add a new line.
             if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing && window.matchMedia('(pointer: fine)').matches) {
               e.preventDefault();

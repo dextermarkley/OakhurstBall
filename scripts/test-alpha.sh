@@ -36,7 +36,7 @@ step unit-backend  sh -c 'cd backend && npm test'
 step unit-frontend sh -c 'cd frontend && npm test'
 # live-cash is left out on purpose: it notifies a real admin and waits for them.
 for t in smoke security pay-now push approval agreements kiosk-remove expenses community \
-         sessions plans freeday kiosk-agreement kiosk-admin scale; do
+         sessions plans freeday kiosk-agreement kiosk-admin chat-rx scale; do
   step "live-$t" sh -c "cd backend && node test/live-$t.mjs"
 done
 if [ "${1:-}" != "--quick" ]; then

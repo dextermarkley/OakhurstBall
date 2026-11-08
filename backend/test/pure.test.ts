@@ -365,3 +365,19 @@ test('contact: all three required, cleaned, emergency number must differ', () =>
   assert.equal(hasContact({ phone: '+1', emergencyName: 'a', emergencyPhone: '+1' }), true);
   assert.equal(hasContact({ phone: '+1' }), false);
 });
+
+// ── Chat reactions ──
+import { cleanEmoji, reactionAttr } from '../src/lib/emoji.js';
+
+test('reactions: one emoji only, including flags, skin tones and families', () => {
+  for (const e of ['👍', '❤️', '🏀', '🔥', '👍🏽', '🇺🇸', '👨‍👩‍👧', '1️⃣', '🏳️‍🌈']) assert.equal(cleanEmoji(e), e, e);
+  for (const bad of ['', 'a', 'lol', '👍👍', '👍 ', '1', '\u200d', '<b>', '🏀a', 42, null, '😀'.repeat(20)]) {
+    assert.equal(cleanEmoji(bad as any), null, String(bad));
+  }
+});
+
+test('reactions: attribute names are safe and reversible', () => {
+  const a = reactionAttr('👨‍👩‍👧');
+  assert.match(a, /^rx_[0-9a-f]+$/);
+  assert.equal(Buffer.from(a.slice(3), 'hex').toString('utf8'), '👨‍👩‍👧');
+});
