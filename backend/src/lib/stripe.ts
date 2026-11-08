@@ -104,6 +104,14 @@ export async function retrieveCheckoutSession(id: string): Promise<CheckoutSessi
   return stripe('GET', `/checkout/sessions/${id}`);
 }
 
+/** Our paymentId for a Stripe PaymentIntent (set via payment_intent_data metadata). */
+export async function paymentIdForIntent(id: string): Promise<string | null> {
+  if (!/^pi_[A-Za-z0-9_]+$/.test(id)) return null;
+  const pi = await stripe('GET', `/payment_intents/${id}`);
+  const pid = pi?.metadata?.paymentId;
+  return typeof pid === 'string' && /^[a-f0-9]{24}$/.test(pid) ? pid : null;
+}
+
 /**
  * Verify a Stripe-Signature header ("t=...,v1=...") over the raw request body.
  * Rejects signatures older than 5 minutes (replay protection).

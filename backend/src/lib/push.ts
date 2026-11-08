@@ -16,6 +16,7 @@ import { SSMClient, GetParameterCommand } from '@aws-sdk/client-ssm';
 import { DeleteCommand, PutCommand, QueryCommand } from '@aws-sdk/lib-dynamodb';
 import webpush from 'web-push';
 import { ddb, TABLE } from './ddb.js';
+import { oneLine } from './text.js';
 
 const ssm = new SSMClient({});
 const PUBLIC_PARAM = process.env.VAPID_PUBLIC_PARAM ?? '/oakhurst/push/vapid-public';
@@ -55,9 +56,10 @@ const B64URL = /^[A-Za-z0-9_-]+={0,2}$/;
 /** Validate a PushSubscription JSON from the browser. Returns an error or null. */
 export function checkSubscription(s: any): string | null {
   if (!s || typeof s !== 'object') return 'subscription required';
+  if (typeof s.endpoint !== 'string') return 'bad endpoint';
   let u: URL;
   try {
-    u = new URL(String(s.endpoint ?? ''));
+    u = new URL(s.endpoint);
   } catch {
     return 'bad endpoint';
   }
@@ -109,7 +111,19 @@ export async function saveSubscription(
     updatedAt: now,
   };
   await ddb.send(new PutCommand({ TableName: TABLE, Item: { ...subKey(s.endpoint), ...item } }));
+  // Keep each account to its newest few devices, so nobody can register hundreds
+  // of fake endpoints and slow every notification down.
+  const mine = (await allSubscriptions())
+    .filter((d) => d.sub === owner.sub)
+    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  await Promise.all(
+    mine.slice(MAX_DEVICES_PER_USER).map((d) =>
+      ddb.send(new DeleteCommand({ TableName: TABLE, Key: subKey(d.endpoint) })).catch(() => {}),
+    ),
+  );
 }
+
+export const MAX_DEVICES_PER_USER = 5;
 
 /** Remove a device, but only one the caller owns. */
 export async function deleteSubscription(endpoint: string, sub: string): Promise<boolean> {
@@ -164,7 +178,7 @@ export async function sendPush(
     const targets = (await allSubscriptions()).filter(filter);
     if (!targets.length) return { sent: 0, failed: 0 };
     const subject = process.env.APP_BASE_URL || 'mailto:no-reply@oakhurst-ball.org';
-    const payload = JSON.stringify(msg);
+    const payload = JSON.stringify({ ...msg, title: oneLine(msg.title), body: [...msg.body].slice(0, 400).join('') });
     const results = await Promise.allSettled(
       targets.map((t) =>
         webpush.sendNotification({ endpoint: t.endpoint, keys: t.keys }, payload, {
@@ -182,7 +196,7 @@ export async function sendPush(
         if (r.status === 'fulfilled') return void sent++;
         failed++;
         const code = (r.reason as any)?.statusCode;
-        if (code === 404 || code === 410) {
+        if (code === 400 || code === 404 || code === 410) {
           await ddb.send(new DeleteCommand({ TableName: TABLE, Key: subKey(targets[i].endpoint) })).catch(() => {});
         } else {
           console.warn('push failed', { code, host: new URL(targets[i].endpoint).hostname });
@@ -199,6 +213,11 @@ export async function sendPush(
 // ── Who gets what ─────────────────────────────────────────────────────────────
 export const toPlayer = (playerId: string) => (s: PushSub) => s.playerId === playerId;
 export const toUser = (sub: string) => (s: PushSub) => s.sub === sub;
-/** Admin profiles predate Cognito links, so match the login email too. */
+/**
+ * An admin's devices. Matched by Cognito account. Admin records not yet linked to
+ * an account fall back to the email, but only on devices registered by a member
+ * of the Cognito 'admin' group: an email address is something anyone can type
+ * into their own profile, group membership is not.
+ */
 export const toAdmin = (a: { cognitoSub?: string; email?: string }) => (s: PushSub) =>
-  (!!a.cognitoSub && s.sub === a.cognitoSub) || (!!a.email && s.email === a.email.toLowerCase());
+  a.cognitoSub ? s.sub === a.cognitoSub : !!a.email && !!s.isAdmin && s.email === a.email.toLowerCase();

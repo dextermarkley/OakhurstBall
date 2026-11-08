@@ -13,4 +13,5 @@ new OakhurstStack(app, 'OakhurstBasketball', {
   },
   description: 'Oakhurst Basketball — serverless payment tracking & check-in',
   domainName: process.env.DOMAIN ?? 'oakhurst-ball.org',
+  alertEmail: process.env.ALERT_EMAIL ?? 'dextermarkley@gmail.com',
 });

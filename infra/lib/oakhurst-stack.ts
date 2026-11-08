@@ -14,6 +14,8 @@ import * as route53 from 'aws-cdk-lib/aws-route53';
 import * as route53targets from 'aws-cdk-lib/aws-route53-targets';
 import * as ses from 'aws-cdk-lib/aws-ses';
 import * as s3 from 'aws-cdk-lib/aws-s3';
+import * as backup from 'aws-cdk-lib/aws-backup';
+import * as budgets from 'aws-cdk-lib/aws-budgets';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 import { createHash } from 'node:crypto';
@@ -39,6 +41,8 @@ export interface OakhurstStackProps extends cdk.StackProps {
    * for apex + www. Omit to run on the default execute-api URL only.
    */
   readonly domainName?: string;
+  /** Who gets the monthly AWS cost alerts. */
+  readonly alertEmail?: string;
 }
 
 /**
@@ -63,7 +67,13 @@ export class OakhurstStack extends cdk.Stack {
       pointInTimeRecoverySpecification: { pointInTimeRecoveryEnabled: true },
       timeToLiveAttribute: 'expiresAt', // auto-expire confirm tokens
       removalPolicy: cdk.RemovalPolicy.RETAIN, // never auto-drop the ledger
+      deletionProtection: true, // the table can't be deleted until this is turned off
     });
+
+    // Daily backups kept 35 days, in a vault that outlives the stack. On top of
+    // point-in-time recovery: a separate copy if the table itself is lost.
+    const backupPlan = backup.BackupPlan.daily35DayRetention(this, 'Backup');
+    backupPlan.addSelection('Table', { resources: [backup.BackupResource.fromDynamoDbTable(table)] });
     table.addGlobalSecondaryIndex({
       indexName: 'GSI1',
       partitionKey: { name: 'GSI1PK', type: dynamodb.AttributeType.STRING },
@@ -114,6 +124,10 @@ export class OakhurstStack extends cdk.Stack {
       mfa: cognito.Mfa.OPTIONAL,
       mfaSecondFactor: { sms: false, otp: true },
       accountRecovery: cognito.AccountRecovery.EMAIL_ONLY,
+      // A changed email only takes effect once the new address is verified, so
+      // nobody can put someone else's address on their account.
+      keepOriginal: { email: true },
+      deletionProtection: true,
       removalPolicy: cdk.RemovalPolicy.RETAIN,
     });
 
@@ -225,9 +239,28 @@ export class OakhurstStack extends cdk.Stack {
       },
     );
 
-    table.grantReadWriteData(apiFn);
-    table.grantReadWriteData(confirmFn);
-    table.grantReadWriteData(postAuthFn);
+    // Item reads/writes and queries only (no Scan, no table admin).
+    const DATA_ACTIONS = [
+      'dynamodb:GetItem',
+      'dynamodb:BatchGetItem',
+      'dynamodb:Query',
+      'dynamodb:PutItem',
+      'dynamodb:UpdateItem',
+      'dynamodb:DeleteItem',
+      'dynamodb:ConditionCheckItem',
+    ];
+    for (const fn of [apiFn, confirmFn, postAuthFn]) table.grant(fn, ...DATA_ACTIONS);
+
+    // Hard ceilings on concurrent Lambdas, so a flood of requests is capped in
+    // cost instead of scaling without limit (the account allows 1000).
+    for (const [fn, n] of [
+      [apiFn, 40],
+      [webFn, 20],
+      [confirmFn, 10],
+      [postAuthFn, 10],
+    ] as const) {
+      (fn.node.defaultChild as lambda.CfnFunction).reservedConcurrentExecutions = n;
+    }
 
     // Session check-in fee + payment amounts (cents), the negative-balance limit,
     // session length, and the club's time zone (for session dates).
@@ -268,10 +301,15 @@ export class OakhurstStack extends cdk.Stack {
       cors: [{ allowedMethods: [s3.HttpMethods.POST], allowedOrigins: siteOrigins, allowedHeaders: ['*'], maxAge: 3600 }],
       lifecycleRules: [{ abortIncompleteMultipartUploadAfter: cdk.Duration.days(1) }],
     });
-    chatBucket.grantPut(apiFn, 'chat/*');
-    chatBucket.grantRead(apiFn, 'chat/*');
-    chatBucket.grantDelete(apiFn, 'chat/*');
+    // Objects under chat/ only: no listing, no bucket settings.
+    apiFn.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ['s3:PutObject', 's3:GetObject', 's3:DeleteObject'],
+        resources: [chatBucket.arnForObjects('chat/*')],
+      }),
+    );
     apiFn.addEnvironment('CHAT_BUCKET', chatBucket.bucketName);
+    webFn.addEnvironment('CHAT_BUCKET', chatBucket.bucketName); // CSP allows this bucket
     new cdk.CfnOutput(this, 'ChatBucket', { value: chatBucket.bucketName });
 
     // Web Push VAPID keys (also created outside CDK; see docs/notifications.md).
@@ -326,6 +364,43 @@ export class OakhurstStack extends cdk.Stack {
       `https://cognito-idp.${this.region}.amazonaws.com/${userPool.userPoolId}`,
       { jwtAudience: [userPoolClient.userPoolClientId] },
     );
+    // ── Throttling ── per-stage limits (requests/second, shared by all callers).
+    // HTTP APIs can't use AWS WAF, so these plus per-user caps in the code
+    // (PIN lockout, pending-payment caps, chat quotas) are the flood protection.
+    const stage = httpApi.defaultStage!.node.defaultChild as apigwv2.CfnStage;
+    stage.defaultRouteSettings = { throttlingBurstLimit: 60, throttlingRateLimit: 30 };
+    // routeSettings is raw JSON, so the keys use the CloudFormation casing.
+    const limit = (rate: number, burst: number) => ({ ThrottlingRateLimit: rate, ThrottlingBurstLimit: burst });
+    stage.routeSettings = {
+      'GET /api/kiosk/{proxy+}': limit(10, 20),
+      'POST /api/kiosk/{proxy+}': limit(3, 10),
+      'GET /api/confirm/{proxy+}': limit(2, 5),
+      'POST /api/confirm/{proxy+}': limit(2, 5),
+      'GET /api/stripe/{proxy+}': limit(5, 10),
+      'POST /api/stripe/{proxy+}': limit(10, 20),
+      'GET /api/media/{proxy+}': limit(20, 60),
+    };
+    // Access log (who called what, status, latency) for investigating abuse.
+    const accessLogs = new logs.LogGroup(this, 'ApiAccessLogs', {
+      logGroupName: '/aws/apigateway/oakhurst-api',
+      retention: logs.RetentionDays.THREE_MONTHS,
+      removalPolicy: cdk.RemovalPolicy.DESTROY,
+    });
+    stage.accessLogSettings = {
+      destinationArn: accessLogs.logGroupArn,
+      format: JSON.stringify({
+        t: '$context.requestTime',
+        ip: '$context.identity.sourceIp',
+        m: '$context.httpMethod',
+        p: '$context.path',
+        s: '$context.status',
+        ms: '$context.responseLatency',
+        sub: '$context.authorizer.claims.sub',
+        ua: '$context.identity.userAgent',
+        id: '$context.requestId',
+      }),
+    };
+
     const apiIntegration = new apigwv2_integ.HttpLambdaIntegration('ApiInteg', apiFn);
     const confirmIntegration = new apigwv2_integ.HttpLambdaIntegration('ConfirmInteg', confirmFn);
 
@@ -394,6 +469,35 @@ export class OakhurstStack extends cdk.Stack {
     // the Cognito trigger depend on the API (a CloudFormation cycle). push.ts falls
     // back to a mailto: VAPID subject without it.
     if (apex) postAuthFn.addEnvironment('APP_BASE_URL', appBaseUrl);
+
+    // ───────────────────────────── Cost alarm ─────────────────────────────────
+    // The club normally costs a few dollars a month. Email when this month's
+    // spend passes $10 so far, or is forecast to pass $25.
+    if (props?.alertEmail) {
+      const to = [{ subscriptionType: 'EMAIL', address: props.alertEmail }];
+      new budgets.CfnBudget(this, 'MonthlyBudget', {
+        budget: {
+          budgetName: 'oakhurst-monthly',
+          budgetType: 'COST',
+          timeUnit: 'MONTHLY',
+          budgetLimit: { amount: 25, unit: 'USD' },
+        },
+        notificationsWithSubscribers: [
+          {
+            notification: { notificationType: 'ACTUAL', comparisonOperator: 'GREATER_THAN', threshold: 40, thresholdType: 'PERCENTAGE' },
+            subscribers: to,
+          },
+          {
+            notification: { notificationType: 'ACTUAL', comparisonOperator: 'GREATER_THAN', threshold: 100, thresholdType: 'PERCENTAGE' },
+            subscribers: to,
+          },
+          {
+            notification: { notificationType: 'FORECASTED', comparisonOperator: 'GREATER_THAN', threshold: 100, thresholdType: 'PERCENTAGE' },
+            subscribers: to,
+          },
+        ],
+      });
+    }
 
     // ───────────────────────────── Outputs ───────────────────────────────────
     new cdk.CfnOutput(this, 'SiteUrl', { value: appBaseUrl });

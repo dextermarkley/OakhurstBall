@@ -91,6 +91,7 @@ try {
     if (it.paymentId) {
       await ddb.send(new DeleteCommand({ TableName: TABLE, Key: { PK: `PAYREF#${it.paymentId}`, SK: 'REF' } }));
       if (it.confirmToken) await ddb.send(new DeleteCommand({ TableName: TABLE, Key: { PK: `TOKEN#${it.confirmToken}`, SK: 'TOKEN' } }));
+      if (it.confirmTokenHash) await ddb.send(new DeleteCommand({ TableName: TABLE, Key: { PK: `TOKENH#${it.confirmTokenHash}`, SK: 'TOKEN' } }));
     }
     await ddb.send(new DeleteCommand({ TableName: TABLE, Key: { PK: it.PK, SK: it.SK } }));
   }

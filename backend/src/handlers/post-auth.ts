@@ -28,14 +28,14 @@ export const handler = async (
     if (sub) {
       const existing = await getPlayerByCognitoSub(sub);
       if (!existing) {
-        await createPlayer({ name, email, phone, cognitoSub: sub });
+        const player = await createPlayer({ name, email: email?.trim().toLowerCase(), phone, cognitoSub: sub });
         console.log('created player for cognito sub', sub);
         // Only a brand-new account (not a password reset, which also fires this).
         if (event.triggerSource === 'PostConfirmation_ConfirmSignUp') {
           await Promise.race([
             sendPush((d) => !!d.isAdmin && d.sub !== sub, {
               title: 'New sign-up',
-              body: `${name} signed up. Tap to approve them for the chat.`,
+              body: `${player.name} signed up. Tap to approve them for the chat.`,
               url: '/admin?tab=players',
               tag: `signup-${sub}`,
             }),

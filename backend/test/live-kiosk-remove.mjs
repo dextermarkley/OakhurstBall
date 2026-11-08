@@ -80,7 +80,7 @@ try {
   r = await call('DELETE', `/api/admin/kiosks/${deviceId}`, A);
   check('admin removes it', r.status === 200 && r.body.removed === true, r);
   r = await call('GET', '/api/kiosk/players', K);
-  check('the removed kiosk is locked out (sends it to pairing)', r.status === 401 && r.body?.error === 'unknown kiosk', r);
+  check('the removed kiosk is locked out (sends it to pairing)', r.status === 401 && r.body?.error === 'bad kiosk token', r);
   r = await call('GET', '/api/admin/kiosks', A);
   check('gone from the kiosks list', !r.body.kiosks.some((k) => k.deviceId === deviceId), r.body);
   r = await call('DELETE', `/api/admin/kiosks/${deviceId}`, A);

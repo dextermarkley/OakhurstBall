@@ -5,14 +5,15 @@
 //          or webhook — whichever arrives first; the rest are no-ops)
 // Settling is one DynamoDB transaction conditioned on status = pending, so a
 // payment can never be credited twice.
-import { TransactWriteCommand, GetCommand, QueryCommand } from '@aws-sdk/lib-dynamodb';
-import { ddb, TABLE, GSI1, keys, gsi } from './ddb.js';
+import { TransactWriteCommand, GetCommand, QueryCommand, UpdateCommand, DeleteCommand } from '@aws-sdk/lib-dynamodb';
+import { ddb, TABLE, GSI1, keys, gsi, sha256 } from './ddb.js';
 import { makeToken, newId } from './crypto.js';
 import { createCheckoutSession, retrieveCheckoutSession } from './stripe.js';
 import { sendEmail, escapeHtml } from './email.js';
 import { PLAN_PRICES, periodFor, type Plan } from './plans.js';
-import { passItem } from './passes.js';
-import { clubDate, getAdmin, getPlayer } from './repo.js';
+import { passItem, passKey } from './passes.js';
+import { isSamePerson } from './views.js';
+import { clubDate, getAdmin, getPlayer, listAdminsDetailed, pendingPaymentsOf } from './repo.js';
 import { sendPush, toAdmin, toPlayer } from './push.js';
 import { refundCurrentSessionFee } from './sessions.js';
 import type { Payment, PaymentMethod } from './types.js';
@@ -46,6 +47,15 @@ function purchaseFor(plan: Plan | undefined, creditCents: number): Purchase {
   };
 }
 const TOKEN_TTL_SECONDS = 24 * 60 * 60;
+/** Cash payments a player can have waiting for confirmation at once. */
+export const MAX_PENDING_CASH = 3;
+/** New Stripe Checkout pages a player can open per 25 minutes. */
+const MAX_RECENT_CHECKOUTS = 4;
+
+/** A payment the rules don't allow (shown to the person as-is, HTTP 409). */
+export class PaymentRefused extends Error {}
+
+
 
 const cents = (name: string, dflt: number) => {
   const v = Number(process.env[name]);
@@ -73,6 +83,7 @@ async function writePending(p: {
   method: PaymentMethod;
   adminId?: string;
   stripeSessionId?: string;
+  checkoutUrl?: string;
   note?: string;
   withToken: boolean;
 }): Promise<{ payment: Payment; token?: string }> {
@@ -93,7 +104,9 @@ async function writePending(p: {
     status: 'pending',
     adminId: p.adminId,
     stripeSessionId: p.stripeSessionId,
-    confirmToken: token,
+    // Only a hash of the confirm token is stored: whoever holds the token can
+    // confirm the cash, and the payment is shown to the player who made it.
+    confirmTokenHash: token ? sha256(token) : undefined,
     createdAt,
     note: p.note,
   };
@@ -102,7 +115,14 @@ async function writePending(p: {
     {
       Put: {
         TableName: TABLE,
-        Item: { PK: `PLAYER#${p.playerId}`, SK: sortKey, ...payment, ...gsi.paymentStatus('pending'), GSI1SK: createdAt },
+        Item: {
+          PK: `PLAYER#${p.playerId}`,
+          SK: sortKey,
+          ...payment,
+          checkoutUrl: p.checkoutUrl, // server-side only (reused for a repeat tap)
+          ...gsi.paymentStatus('pending'),
+          GSI1SK: createdAt,
+        },
       },
     },
     { Put: { TableName: TABLE, Item: { ...paymentRefKey(p.paymentId), playerId: p.playerId, sortKey } } },
@@ -112,7 +132,7 @@ async function writePending(p: {
       Put: {
         TableName: TABLE,
         Item: {
-          ...keys.token(token),
+          ...keys.tokenHash(sha256(token)),
           playerId: p.playerId,
           paymentId: p.paymentId,
           paymentSortKey: sortKey,
@@ -162,10 +182,14 @@ async function settle(
   sortKey: string,
   payment: Payment,
   outcome: 'confirmed' | 'denied' | 'expired',
-  deleteTokenKey?: { PK: string; SK: string },
+  deleteTokenKey: { PK: string; SK: string } | undefined,
+  settledBy: string,
   asCredit = false,
 ): Promise<'done' | 'already'> {
   const now = nowIso();
+  // A pass for a period that has already ended (cash confirmed late) is worth
+  // nothing, so the money goes to the balance instead.
+  if (outcome === 'confirmed' && payment.plan && payment.periodEnd && payment.periodEnd < clubDate()) asCredit = true;
   const makePass = outcome === 'confirmed' && !!payment.plan && !!payment.periodId && !asCredit;
   const items: any[] = [
     {
@@ -173,15 +197,16 @@ async function settle(
         TableName: TABLE,
         Key: { PK: `PLAYER#${playerId}`, SK: sortKey },
         UpdateExpression:
-          'SET #s = :out, settledAt = :now, GSI1PK = :gpk' +
+          'SET #s = :out, settledAt = :now, settledBy = :by, GSI1PK = :gpk' +
           (asCredit ? ', creditedInstead = :t' : '') +
-          ' REMOVE confirmToken',
+          ' REMOVE confirmToken, checkoutUrl',
         ConditionExpression: '#s = :pending',
         ExpressionAttributeNames: { '#s': 'status' },
         ExpressionAttributeValues: {
           ':out': outcome,
           ':pending': 'pending',
           ':now': now,
+          ':by': settledBy,
           ':gpk': `PAYMENT_STATUS#${outcome}`,
           ...(asCredit ? { ':t': true } : {}),
         },
@@ -237,7 +262,7 @@ async function settle(
     // Payment still pending but the pass already exists → credit the money instead.
     if (makePass && code(0) !== 'ConditionalCheckFailed' && code(1) === 'ConditionalCheckFailed') {
       console.warn('pass already held; crediting balance instead', { paymentId: payment.paymentId });
-      return settle(playerId, sortKey, payment, outcome, deleteTokenKey, true);
+      return settle(playerId, sortKey, payment, outcome, deleteTokenKey, settledBy, true);
     }
     return 'already';
   }
@@ -267,6 +292,20 @@ export async function createCashPayment(input: {
   /** Credit amount (ignored for passes, which have a fixed price). */
   creditCents?: number;
 }): Promise<{ payment: Payment; emailed: boolean }> {
+  const [player, adm, pending] = await Promise.all([
+    getPlayer(input.playerId),
+    getAdmin(input.adminId),
+    pendingPaymentsOf(input.playerId),
+  ]);
+  // Nobody confirms their own cash: the admin who receives it must be someone else.
+  if (player && adm && isSamePerson(player, adm)) {
+    throw new PaymentRefused('You can’t confirm your own cash. Hand it to a different admin and pick them.');
+  }
+  if (pending.filter((p) => p.method === 'cash').length >= MAX_PENDING_CASH) {
+    throw new PaymentRefused(
+      'You already have cash payments waiting for an admin to confirm. Ask them to confirm those first.',
+    );
+  }
   const purchase = purchaseFor(input.plan, input.creditCents ?? AMOUNTS.cash);
   const amountCents = purchase.amountCents;
   const { payment, token } = await writePending({
@@ -282,7 +321,6 @@ export async function createCashPayment(input: {
   const link = `${baseUrl()}/confirm/${token}`;
   const amount = dollars(amountCents);
   // Push to the admin's installed app too; it opens the same confirm page.
-  const adm = await getAdmin(input.adminId).catch(() => null);
   await sendPush(
     toAdmin({ cognitoSub: adm?.cognitoSub, email: input.adminEmail ?? adm?.email }),
     {
@@ -329,38 +367,57 @@ export async function createCashPayment(input: {
 export async function adminSettle(
   paymentId: string,
   outcome: 'confirmed' | 'denied',
-): Promise<'done' | 'already' | 'notfound' | 'notcash'> {
+  by: { sub: string },
+): Promise<'done' | 'already' | 'notfound' | 'notcash' | 'self'> {
   const found = await getPayment(paymentId);
   if (!found) return 'notfound';
   const { playerId, sortKey, payment } = found;
   if (payment.method !== 'cash') return 'notcash';
   if (payment.status !== 'pending') return 'already';
+  // An admin can't confirm their own cash (denying it is fine).
+  if (outcome === 'confirmed') {
+    const player = await getPlayer(playerId);
+    if (player?.cognitoSub && player.cognitoSub === by.sub) return 'self';
+  }
   return settle(
     playerId,
     sortKey,
     payment,
     outcome,
-    payment.confirmToken ? keys.token(payment.confirmToken) : undefined,
+    payment.confirmTokenHash
+      ? keys.tokenHash(payment.confirmTokenHash)
+      : payment.confirmToken
+        ? keys.token(payment.confirmToken)
+        : undefined,
+    `admin:${by.sub}`,
   );
 }
 
 /** Resolve an emailed confirm token → its pending payment. */
 export async function resolveToken(token: string) {
-  const res = await ddb.send(new GetCommand({ TableName: TABLE, Key: keys.token(token) }));
+  if (!/^[A-Za-z0-9_-]{20,64}$/.test(token)) return null;
+  let tokenKey = keys.tokenHash(sha256(token));
+  let res = await ddb.send(new GetCommand({ TableName: TABLE, Key: tokenKey }));
+  if (!res.Item) {
+    tokenKey = keys.token(token); // link sent before tokens were hashed
+    res = await ddb.send(new GetCommand({ TableName: TABLE, Key: tokenKey }));
+  }
   if (!res.Item) return null;
+  // DynamoDB TTL deletes lazily (up to days later), so enforce the expiry here.
+  if (Number(res.Item.expiresAt ?? 0) <= Math.floor(Date.now() / 1000)) return null;
   const { playerId, paymentSortKey } = res.Item as { playerId: string; paymentSortKey: string };
   const pay = await ddb.send(
     new GetCommand({ TableName: TABLE, Key: { PK: `PLAYER#${playerId}`, SK: paymentSortKey } }),
   );
   if (!pay.Item) return null;
-  return { playerId, paymentSortKey, payment: pay.Item as Payment };
+  return { playerId, paymentSortKey, tokenKey, payment: pay.Item as Payment };
 }
 
 async function settleByToken(token: string, outcome: 'confirmed' | 'denied') {
   const r = await resolveToken(token);
   if (!r) return 'gone' as const;
   if (r.payment.status !== 'pending') return 'already' as const;
-  const res = await settle(r.playerId, r.paymentSortKey, r.payment, outcome, keys.token(token));
+  const res = await settle(r.playerId, r.paymentSortKey, r.payment, outcome, r.tokenKey, 'link');
   return res === 'done' ? outcome : ('already' as const);
 }
 export const confirmPayment = (token: string) => settleByToken(token, 'confirmed');
@@ -368,8 +425,24 @@ export const denyPayment = (token: string) => settleByToken(token, 'denied');
 
 // ─────────────────────────────── Card ──────────────────────────────────────
 export async function createCardPayment(input: { playerId: string; playerName: string; plan?: Plan; email?: string }) {
-  const paymentId = newId();
   const purchase = purchaseFor(input.plan, AMOUNTS.card);
+  // A repeat tap reuses the Checkout page opened in the last 25 minutes (Stripe
+  // expires them at 35), so tapping Pay over and over can't flood Stripe.
+  const pendingCard = (await pendingPaymentsOf(input.playerId)).filter((p) => p.method === 'card');
+  const fresh = Date.now() - 25 * 60 * 1000;
+  const reuse = pendingCard.find(
+    (p: any) =>
+      p.checkoutUrl &&
+      Date.parse(p.createdAt) > fresh &&
+      (p.plan ?? null) === (purchase.plan ?? null) &&
+      p.amountCents === purchase.amountCents &&
+      (p.periodId ?? null) === (purchase.periodId ?? null),
+  ) as (Payment & { checkoutUrl: string }) | undefined;
+  if (reuse) return { payment: reuse, checkoutUrl: reuse.checkoutUrl };
+  if (pendingCard.filter((p) => Date.parse(p.createdAt) > fresh).length >= MAX_RECENT_CHECKOUTS) {
+    throw new PaymentRefused('Too many card payments started. Wait a few minutes and try again.');
+  }
+  const paymentId = newId();
   const session = await createCheckoutSession({
     paymentId,
     playerId: input.playerId,
@@ -390,6 +463,7 @@ export async function createCardPayment(input: { playerId: string; playerName: s
     purchase,
     method: 'card',
     stripeSessionId: session.id,
+    checkoutUrl: session.url,
     note: `Card — ${input.playerName} — ${purchase.what}`,
     withToken: false,
   });
@@ -412,7 +486,7 @@ export async function syncCardPayment(paymentId: string): Promise<Payment['statu
   const matches =
     s.metadata?.paymentId === paymentId && s.amount_total === payment.amountCents && s.currency === 'usd';
   if (s.payment_status === 'paid' && matches) {
-    await settle(playerId, sortKey, payment, 'confirmed');
+    await settle(playerId, sortKey, payment, 'confirmed', undefined, 'stripe');
     return 'confirmed';
   }
   if (s.payment_status === 'paid' && !matches) {
@@ -420,10 +494,90 @@ export async function syncCardPayment(paymentId: string): Promise<Payment['statu
     return 'pending';
   }
   if (s.status === 'expired') {
-    await settle(playerId, sortKey, payment, 'expired');
+    await settle(playerId, sortKey, payment, 'expired', undefined, 'stripe');
     return 'expired';
   }
   return 'pending';
+}
+
+// ─────────────────────── Card refunds and disputes ─────────────────────────
+/**
+ * Stripe says money for a confirmed card payment went back (refund) or is being
+ * clawed back (dispute / chargeback). Take back what it bought, once:
+ *   - a pass bought by this payment is removed;
+ *   - otherwise the amount comes off the balance (it may go negative).
+ * Then tell every admin by email and push. Returns false if nothing to do.
+ */
+export async function reverseCardPayment(paymentId: string, kind: 'refunded' | 'disputed'): Promise<boolean> {
+  const found = await getPayment(paymentId);
+  if (!found) return false;
+  const { playerId, sortKey, payment } = found;
+  if (payment.method !== 'card' || payment.status !== 'confirmed' || payment.reversed) return false;
+  const now = nowIso();
+  try {
+    await ddb.send(
+      new UpdateCommand({
+        TableName: TABLE,
+        Key: { PK: `PLAYER#${playerId}`, SK: sortKey },
+        UpdateExpression: 'SET reversed = :k, reversedAt = :now',
+        ConditionExpression: '#s = :c AND attribute_not_exists(reversed)',
+        ExpressionAttributeNames: { '#s': 'status' },
+        ExpressionAttributeValues: { ':k': kind, ':now': now, ':c': 'confirmed' },
+      }),
+    );
+  } catch (err: any) {
+    if (err?.name === 'ConditionalCheckFailedException') return false;
+    throw err;
+  }
+  let what = `${dollars(payment.amountCents)} taken off their balance`;
+  let passRemoved = false;
+  if (payment.plan && payment.periodId && !payment.creditedInstead) {
+    try {
+      await ddb.send(
+        new DeleteCommand({
+          TableName: TABLE,
+          Key: passKey(playerId, payment.periodId),
+          ConditionExpression: 'paymentId = :p',
+          ExpressionAttributeValues: { ':p': paymentId },
+        }),
+      );
+      passRemoved = true;
+      what = `their ${payment.periodLabel ?? payment.plan} pass removed`;
+    } catch (err: any) {
+      if (err?.name !== 'ConditionalCheckFailedException') throw err;
+    }
+  }
+  if (!passRemoved) {
+    await ddb.send(
+      new UpdateCommand({
+        TableName: TABLE,
+        Key: { PK: `PLAYER#${playerId}`, SK: 'PROFILE' },
+        UpdateExpression: 'ADD balanceCents :d SET updatedAt = :now',
+        ConditionExpression: 'attribute_exists(PK)',
+        ExpressionAttributeValues: { ':d': -payment.amountCents, ':now': now },
+      }),
+    );
+  }
+  const player = await getPlayer(playerId).catch(() => null);
+  const name = player?.name ?? 'A player';
+  const title = `Card payment ${kind === 'refunded' ? 'refunded' : 'disputed'}: ${name}`;
+  const body = `${dollars(payment.amountCents)} card payment ${kind === 'refunded' ? 'was refunded' : 'is disputed (chargeback)'} in Stripe, so the app has ${what}.`;
+  console.warn('card payment reversed', { paymentId, kind, passRemoved });
+  const admins = (await listAdminsDetailed()).filter((a) => a.active);
+  await sendPush((s) => !!s.isAdmin, { title, body, url: '/admin?tab=players', tag: `reverse-${paymentId}` });
+  await Promise.all(
+    admins
+      .filter((a) => a.email)
+      .map((a) =>
+        sendEmail({
+          to: a.email!,
+          subject: title,
+          text: `${body}\n\nCheck the payment in the Stripe Dashboard. Payment id: ${paymentId}`,
+          html: `<p>${escapeHtml(body)}</p><p style="color:#6b7684;font-size:13px">Check the payment in the Stripe Dashboard. Payment id: ${paymentId}</p>`,
+        }).catch((e) => console.error('reversal email failed', e)),
+      ),
+  );
+  return true;
 }
 
 /** Admin queue. */

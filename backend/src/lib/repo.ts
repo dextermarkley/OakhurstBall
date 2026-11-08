@@ -1,5 +1,6 @@
 // Data-access helpers for players, admins, check-ins.
 import {
+  BatchGetCommand,
   GetCommand,
   PutCommand,
   QueryCommand,
@@ -9,7 +10,9 @@ import {
 } from '@aws-sdk/lib-dynamodb';
 import { ddb, TABLE, GSI1, keys, gsi } from './ddb.js';
 import { newId } from './crypto.js';
-import type { Admin, CheckIn, Player, PublicPlayer } from './types.js';
+import { paymentView } from './views.js';
+import { cleanName } from './text.js';
+import type { Admin, CheckIn, Payment, Player, PublicPlayer } from './types.js';
 
 const nowIso = () => new Date().toISOString();
 const today = () => new Date().toISOString().slice(0, 10);
@@ -43,9 +46,10 @@ export async function createPlayer(input: {
   approved?: boolean;
 }): Promise<Player> {
   const playerId = newId();
+  const name = cleanName(input.name) || 'New Player';
   const player: Player = {
     playerId,
-    name: input.name,
+    name,
     email: input.email,
     phone: input.phone,
     pinHash: input.pinHash,
@@ -63,7 +67,7 @@ export async function createPlayer(input: {
         ...keys.playerProfile(playerId),
         ...player,
         ...gsi.playerList(),
-        GSI1SK: input.name.toLowerCase(),
+        GSI1SK: name.toLowerCase(),
       },
     }),
   );
@@ -94,20 +98,6 @@ export async function listPlayers(): Promise<PublicPlayer[]> {
       hasAccount: !!i.cognitoSub,
     }))
     .sort((a, b) => a.name.localeCompare(b.name));
-}
-
-/** Adjust balance by a signed delta (e.g. charge dues → negative). */
-export async function adjustBalance(playerId: string, deltaCents: number): Promise<number> {
-  const r = await ddb.send(
-    new UpdateCommand({
-      TableName: TABLE,
-      Key: keys.playerProfile(playerId),
-      UpdateExpression: 'ADD balanceCents :d SET updatedAt = :now',
-      ExpressionAttributeValues: { ':d': deltaCents, ':now': nowIso() },
-      ReturnValues: 'UPDATED_NEW',
-    }),
-  );
-  return (r.Attributes as any)?.balanceCents ?? 0;
 }
 
 /** Approve (or un-approve) a player for members-only features like the chat. */
@@ -204,12 +194,48 @@ export async function listAdminsDetailed(): Promise<
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
+/**
+ * Link an admin record to the signed-in admin's Cognito account, so pushes and
+ * self-payment checks can match by sub rather than by an email someone could set.
+ * Only called for users in the Cognito 'admin' group with a verified email, and
+ * only fills an empty cognitoSub (never moves an existing link).
+ */
+export async function linkAdminSub(email: string, sub: string): Promise<void> {
+  const e = email.toLowerCase();
+  const r = await ddb.send(
+    new QueryCommand({
+      TableName: TABLE,
+      IndexName: GSI1,
+      KeyConditionExpression: 'GSI1PK = :pk',
+      ExpressionAttributeValues: { ':pk': 'ADMIN' },
+    }),
+  );
+  for (const a of (r.Items ?? []) as Admin[]) {
+    if (a.cognitoSub || a.email?.toLowerCase() !== e) continue;
+    await ddb
+      .send(
+        new UpdateCommand({
+          TableName: TABLE,
+          Key: keys.adminProfile(a.adminId),
+          UpdateExpression: 'SET cognitoSub = :s',
+          ConditionExpression: 'attribute_exists(PK) AND attribute_not_exists(cognitoSub)',
+          ExpressionAttributeValues: { ':s': sub },
+        }),
+      )
+      .catch((err) => {
+        if (err?.name !== 'ConditionalCheckFailedException') throw err;
+      });
+  }
+}
+
 export async function setAdminEmail(adminId: string, email: string): Promise<void> {
   await ddb.send(
     new UpdateCommand({
       TableName: TABLE,
       Key: keys.adminProfile(adminId),
-      UpdateExpression: 'SET email = :e',
+      // A new email may be a different person: drop the old account link; the new
+      // owner is linked the next time they sign in (linkAdminSub).
+      UpdateExpression: 'SET email = :e REMOVE cognitoSub',
       ConditionExpression: 'attribute_exists(PK)',
       ExpressionAttributeValues: { ':e': email },
     }),
@@ -223,9 +249,10 @@ export async function createAdmin(input: {
   cognitoSub?: string;
 }): Promise<Admin> {
   const adminId = newId();
+  const name = cleanName(input.name) || 'Admin';
   const admin: Admin = {
     adminId,
-    name: input.name,
+    name,
     email: input.email,
     phone: input.phone,
     cognitoSub: input.cognitoSub,
@@ -239,7 +266,7 @@ export async function createAdmin(input: {
         ...keys.adminProfile(adminId),
         ...admin,
         ...gsi.adminList(),
-        GSI1SK: input.name.toLowerCase(),
+        GSI1SK: name.toLowerCase(),
       },
     }),
   );
@@ -282,11 +309,134 @@ export async function playerPayments(playerId: string, limit = 50) {
       Limit: limit,
     }),
   );
-  return r.Items ?? [];
+  return (r.Items ?? []).map(paymentView);
+}
+
+/** A player's pending payments (raw items, server-side use only). */
+export async function pendingPaymentsOf(playerId: string): Promise<Payment[]> {
+  const r = await ddb.send(
+    new QueryCommand({
+      TableName: TABLE,
+      KeyConditionExpression: 'PK = :pk AND begins_with(SK, :sk)',
+      FilterExpression: '#s = :p',
+      ExpressionAttributeNames: { '#s': 'status' },
+      ExpressionAttributeValues: { ':pk': `PLAYER#${playerId}`, ':sk': 'PAYMENT#', ':p': 'pending' },
+    }),
+  );
+  return (r.Items ?? []) as Payment[];
+}
+
+// ─────────────────────────── Kiosk PIN lockout ──────────────────────────────
+// Failed PINs are counted per player in two windows: 5 in 15 minutes locks the
+// player for the rest of that window; 20 in a day locks them for the day. That
+// turns a 10,000-PIN search into years. Setting a new PIN in the app clears both.
+const PIN_WINDOW_SECONDS = 15 * 60;
+export const PIN_MAX_SHORT = 5;
+export const PIN_MAX_DAY = 20;
+
+function pinFailKeys(playerId: string, nowSec = Math.floor(Date.now() / 1000)) {
+  const bucket = Math.floor(nowSec / PIN_WINDOW_SECONDS);
+  const day = Math.floor(nowSec / 86400);
+  return {
+    short: { PK: `PLAYER#${playerId}`, SK: `PINFAIL#Q#${bucket}`, expiresAt: (bucket + 1) * PIN_WINDOW_SECONDS },
+    day: { PK: `PLAYER#${playerId}`, SK: `PINFAIL#D#${day}`, expiresAt: (day + 1) * 86400 },
+  };
+}
+
+/** Whether this player's PIN is locked by too many recent failures, and for how long. */
+export async function pinLocked(playerId: string): Promise<'short' | 'day' | null> {
+  const k = pinFailKeys(playerId);
+  const r = await ddb.send(
+    new BatchGetCommand({
+      RequestItems: {
+        [TABLE]: { Keys: [k.short, k.day].map(({ PK, SK }) => ({ PK, SK })), ProjectionExpression: 'SK, fails' },
+      },
+    }),
+  );
+  const got = new Map((r.Responses?.[TABLE] ?? []).map((i: any) => [i.SK, Number(i.fails ?? 0)]));
+  if ((got.get(k.day.SK) ?? 0) >= PIN_MAX_DAY) return 'day';
+  return (got.get(k.short.SK) ?? 0) >= PIN_MAX_SHORT ? 'short' : null;
+}
+
+export async function recordPinFailure(playerId: string): Promise<void> {
+  const k = pinFailKeys(playerId);
+  await Promise.all(
+    [k.short, k.day].map(({ PK, SK, expiresAt }) =>
+      ddb.send(
+        new UpdateCommand({
+          TableName: TABLE,
+          Key: { PK, SK },
+          UpdateExpression: 'ADD fails :one SET expiresAt = :exp',
+          ExpressionAttributeValues: { ':one': 1, ':exp': expiresAt },
+        }),
+      ),
+    ),
+  );
+}
+
+export async function clearPinFailures(playerId: string): Promise<void> {
+  const k = pinFailKeys(playerId);
+  await Promise.all(
+    [k.short, k.day].map(({ PK, SK }) => ddb.send(new DeleteCommand({ TableName: TABLE, Key: { PK, SK } }))),
+  );
+}
+
+// ─────────────────────────── Admin balance changes ──────────────────────────
+/** Largest single manual charge or credit an admin can make. */
+export const MAX_ADJUST_CENTS = 100_000; // $1,000
+
+/**
+ * Charge (negative delta) or credit (positive) a player's balance by hand, and
+ * write an audit row in the same transaction. Returns the new balance, or null if
+ * there's no such player.
+ */
+export async function adminAdjustBalance(
+  playerId: string,
+  deltaCents: number,
+  by: { sub: string; name: string },
+  note?: string,
+): Promise<number | null> {
+  const now = nowIso();
+  try {
+    await ddb.send(
+      new TransactWriteCommand({
+        TransactItems: [
+          {
+            Update: {
+              TableName: TABLE,
+              Key: keys.playerProfile(playerId),
+              UpdateExpression: 'ADD balanceCents :d SET updatedAt = :now',
+              ConditionExpression: 'attribute_exists(PK)',
+              ExpressionAttributeValues: { ':d': deltaCents, ':now': now },
+            },
+          },
+          {
+            Put: {
+              TableName: TABLE,
+              Item: {
+                PK: `PLAYER#${playerId}`,
+                SK: `ADJUST#${now}#${newId()}`,
+                playerId,
+                deltaCents,
+                note: note || undefined,
+                bySub: by.sub,
+                byName: by.name,
+                createdAt: now,
+              },
+            },
+          },
+        ],
+      }),
+    );
+  } catch (err: any) {
+    if (err?.name === 'TransactionCanceledException') return null;
+    throw err;
+  }
+  return (await getPlayer(playerId))?.balanceCents ?? 0;
 }
 
 // ───────────────────────────── Kiosk devices ────────────────────────────────
-import { hashSecret, makeToken } from './crypto.js';
+import { hashToken, makeToken } from './crypto.js';
 import type { KioskDevice } from './types.js';
 
 /**
@@ -300,10 +450,11 @@ export async function createKiosk(
   label: string,
 ): Promise<{ deviceId: string; label: string; token: string }> {
   const token = makeToken();
+  label = cleanName(label);
   const device: KioskDevice = {
     deviceId,
     label: label || deviceId,
-    deviceSecretHash: hashSecret(token),
+    deviceSecretHash: hashToken(token),
     active: true,
   };
   await ddb.send(

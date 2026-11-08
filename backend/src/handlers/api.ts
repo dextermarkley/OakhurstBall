@@ -26,7 +26,12 @@ import {
   getAdmin,
   createPlayer,
   createAdmin,
-  adjustBalance,
+  adminAdjustBalance,
+  MAX_ADJUST_CENTS,
+  pinLocked,
+  recordPinFailure,
+  clearPinFailures,
+  linkAdminSub,
   setPlayerPin,
   playerCheckins,
   playerPayments,
@@ -39,10 +44,11 @@ import {
   setAdminEmail,
 } from '../lib/repo.js';
 
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 import { ddb, TABLE, keys } from '../lib/ddb.js';
-import { GetCommand } from '@aws-sdk/lib-dynamodb';
-import { verifySecret, hashSecret } from '../lib/crypto.js';
+import { GetCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
+import { verifySecret, hashSecret, hashToken, verifyToken } from '../lib/crypto.js';
+import { cleanEmail, cleanName, isId, isPin } from '../lib/text.js';
+import type { Player } from '../lib/types.js';
 import {
   AMOUNTS,
   createCashPayment,
@@ -51,6 +57,8 @@ import {
   getPayment,
   listPending,
   adminSettle,
+  PaymentRefused,
+  reverseCardPayment,
 } from '../lib/payments.js';
 import {
   StripeNotConfigured,
@@ -58,6 +66,7 @@ import {
   webhookSecret,
   retrieveCheckoutSession,
   verifyWebhookSignature,
+  paymentIdForIntent,
 } from '../lib/stripe.js';
 import {
   NEGATIVE_LIMIT_CENTS,
@@ -188,6 +197,7 @@ export const handler = async (
     return notFound();
   } catch (err) {
     if (err instanceof StripeNotConfigured) return json(503, { error: err.message });
+    if (err instanceof PaymentRefused) return json(409, { error: err.message });
     console.error('handler error', err);
     return serverError();
   }
@@ -233,7 +243,15 @@ async function stripeRouter(
       evt.type === 'checkout.session.expired'
     ) {
       const paymentId = evt.data?.object?.metadata?.paymentId;
-      if (paymentId) await syncCardPayment(paymentId);
+      if (isId(paymentId)) await syncCardPayment(paymentId);
+    }
+    // Money went back to the card: take back what it bought and tell the admins.
+    // A partial refund is left to the admins (they chose the amount in Stripe).
+    const obj = evt.data?.object ?? {};
+    const fullRefund = evt.type === 'charge.refunded' && obj.refunded === true;
+    if (fullRefund || evt.type === 'charge.dispute.created') {
+      const paymentId = typeof obj.payment_intent === 'string' ? await paymentIdForIntent(obj.payment_intent) : null;
+      if (paymentId) await reverseCardPayment(paymentId, fullRefund ? 'refunded' : 'disputed');
     }
     return ok({ received: true });
   }
@@ -242,6 +260,7 @@ async function stripeRouter(
 }
 
 // ─────────────────────────── Kiosk routes ───────────────────────────────────
+const KIOSK_ID_RE = /^[a-zA-Z0-9][a-zA-Z0-9_-]{1,63}$/;
 // Guarded by the x-kiosk-token header validated against a KIOSK# record.
 async function kioskRouter(
   event: APIGatewayProxyEventV2,
@@ -251,13 +270,54 @@ async function kioskRouter(
   const token = event.headers?.['x-kiosk-token'] ?? event.headers?.['X-Kiosk-Token'];
   const deviceId = event.headers?.['x-kiosk-device'] ?? event.headers?.['X-Kiosk-Device'];
   if (!token || !deviceId) return unauthorized('missing kiosk credentials');
+  // One answer for "no such kiosk" and "wrong token", so device ids can't be probed.
+  if (!KIOSK_ID_RE.test(deviceId) || !/^[A-Za-z0-9_-]{20,64}$/.test(token)) return unauthorized('bad kiosk token');
 
   const dev = await ddb.send(
     new GetCommand({ TableName: TABLE, Key: keys.kioskProfile(deviceId) }),
   );
-  if (!dev.Item || !(dev.Item as any).active) return unauthorized('unknown kiosk');
-  if (!verifySecret(token, (dev.Item as any).deviceSecretHash)) {
-    return unauthorized('bad kiosk token');
+  const stored = String((dev.Item as any)?.deviceSecretHash ?? '');
+  if (!dev.Item || !(dev.Item as any).active) return unauthorized('bad kiosk token');
+  if (stored.startsWith('sha256:')) {
+    if (!verifyToken(token, stored)) return unauthorized('bad kiosk token');
+  } else {
+    // Kiosk paired before tokens were hashed with SHA-256: check the old scrypt
+    // hash once, then store the fast hash so later requests skip scrypt.
+    if (!verifySecret(token, stored)) return unauthorized('bad kiosk token');
+    await ddb
+      .send(
+        new UpdateCommand({
+          TableName: TABLE,
+          Key: keys.kioskProfile(deviceId),
+          UpdateExpression: 'SET deviceSecretHash = :h',
+          ConditionExpression: 'deviceSecretHash = :old',
+          ExpressionAttributeValues: { ':h': hashToken(token), ':old': stored },
+        }),
+      )
+      .catch((e) => console.warn('kiosk hash upgrade skipped', e?.name));
+  }
+
+  /**
+   * The player behind a kiosk request, after checking their PIN. Too many wrong
+   * PINs lock the player for a while (see pinLocked), so PINs can't be guessed.
+   */
+  async function kioskPlayer(b: any): Promise<{ player: Player } | { res: APIGatewayProxyResultV2 }> {
+    if (!isId(b.playerId) || b.pin == null || b.pin === '') return { res: badRequest('playerId and pin required') };
+    const player = await getPlayer(b.playerId);
+    if (!player) return { res: notFound('Player not found') };
+    const locked = await pinLocked(player.playerId);
+    if (locked) {
+      const when = locked === 'day' ? 'later' : 'in 15 minutes';
+      return {
+        res: json(429, { error: `Too many wrong PINs. Try again ${when}, or set a new PIN in the app under Kiosk PIN.` }),
+      };
+    }
+    if (!isPin(b.pin) || !player.pinHash || !verifySecret(String(b.pin), player.pinHash)) {
+      await recordPinFailure(player.playerId);
+      return { res: unauthorized('wrong PIN') };
+    }
+    await clearPinFailures(player.playerId).catch(() => {});
+    return { player };
   }
 
   // GET /kiosk/players — picker list. Only a negative-balance flag, no amounts.
@@ -297,13 +357,9 @@ async function kioskRouter(
   // Checks into the open session and charges the fee once per session.
   // result: checked_in | already | limit (pay first) | no_session
   if (path === '/kiosk/checkin' && m === 'POST') {
-    const { playerId, pin } = parseBody(event);
-    if (!playerId || !pin) return badRequest('playerId and pin required');
-    const player = await getPlayer(playerId);
-    if (!player) return notFound('Player not found');
-    if (!player.pinHash || !verifySecret(String(pin), player.pinHash)) {
-      return unauthorized('wrong PIN');
-    }
+    const k = await kioskPlayer(parseBody(event));
+    if ('res' in k) return k.res;
+    const { player } = k;
     // No check-in until the current waiver + club rules are signed (they can
     // sign right here on the kiosk: POST /kiosk/agreements).
     if (!isCurrent(player as any)) {
@@ -324,10 +380,9 @@ async function kioskRouter(
   // A player signs on the kiosk (e.g. one an admin added who never uses the app).
   if (path === '/kiosk/agreements' && m === 'POST') {
     const b = parseBody(event);
-    if (!b.playerId || !b.pin) return badRequest('playerId and pin required');
-    const player = await getPlayer(String(b.playerId));
-    if (!player) return notFound('Player not found');
-    if (!player.pinHash || !verifySecret(String(b.pin), player.pinHash)) return unauthorized('wrong PIN');
+    const k = await kioskPlayer(b);
+    if ('res' in k) return k.res;
+    const { player } = k;
     const { sig, error } = checkSignature(b);
     if (error) return badRequest(error);
     const agreedAt = await recordAgreements(player.playerId, sig!, {
@@ -342,16 +397,15 @@ async function kioskRouter(
   // plan 'quarter' | 'year' buys a pass; no plan buys drop-in credit.
   // Amounts are fixed server-side; the kiosk never sends one.
   if (path === '/kiosk/pay' && m === 'POST') {
-    const { playerId, pin, method: pm, adminId, plan: rawPlan, amountCents: rawAmount } = parseBody(event);
-    if (!playerId || !pin) return badRequest('playerId and pin required');
+    const body = parseBody(event);
+    const { method: pm, adminId, plan: rawPlan, amountCents: rawAmount } = body;
     if (pm !== 'card' && pm !== 'cash') return badRequest('Choose card or cash');
     if (rawPlan != null && !isPlan(rawPlan)) return badRequest('Choose a quarter pass or a year pass');
     const plan = (rawPlan ?? undefined) as Plan | undefined;
-    const player = await getPlayer(playerId);
-    if (!player) return notFound('Player not found');
-    if (!player.pinHash || !verifySecret(String(pin), player.pinHash)) {
-      return unauthorized('wrong PIN');
-    }
+    const k = await kioskPlayer(body);
+    if ('res' in k) return k.res;
+    const { player } = k;
+    const playerId = player.playerId;
     if (plan) {
       const blocked = await planBlocked(playerId, plan);
       if (blocked) return json(409, { error: blocked });
@@ -367,7 +421,7 @@ async function kioskRouter(
       return created({ paymentId: payment.paymentId, amountCents: payment.amountCents, checkoutUrl });
     }
 
-    if (!adminId) return badRequest('Pick who you handed the cash to');
+    if (!isId(adminId)) return badRequest('Pick who you handed the cash to');
     const credit = plan ? AMOUNTS.cash : cashCreditCents(rawAmount, AMOUNTS.cash);
     if (typeof credit === 'string') return badRequest(credit);
     const admin = await getAdmin(adminId);
@@ -498,7 +552,9 @@ async function communityRouter(
     const { contentType, size } = parseBody(event);
     const bad = checkUpload(contentType, size);
     if (bad) return badRequest(bad);
-    return ok(await uploadTicket(claims.sub, String(contentType)));
+    const t = await uploadTicket(claims.sub, String(contentType));
+    if ('error' in t) return json(429, { error: t.error });
+    return ok(t);
   }
   if (path === '/api/chat/delete' && m === 'POST') {
     const { cursor } = parseBody(event);
@@ -539,6 +595,11 @@ async function apiRouter(
 
   // GET /api/me — profile + role (+ linked player)
   if (path === '/api/me' && m === 'GET') {
+    // Link this admin's record to their account (once), so admin pushes and
+    // self-payment checks go by account rather than by email.
+    if (admin && claims.emailVerified && claims.email) {
+      await linkAdminSub(claims.email, claims.sub).catch((e) => console.warn('admin link failed', e?.name));
+    }
     const player = await getPlayerByCognitoSub(claims.sub);
     return ok({
       sub: claims.sub,
@@ -654,10 +715,10 @@ async function apiRouter(
     const { adminId, plan: rawPlan, amountCents: rawAmount } = parseBody(event);
     if (rawPlan != null && !isPlan(rawPlan)) return badRequest('Choose a quarter pass or a year pass');
     const plan = (rawPlan ?? undefined) as Plan | undefined;
-    if (!adminId) return badRequest('Pick who you handed the cash to');
+    if (!isId(adminId)) return badRequest('Pick who you handed the cash to');
     const credit = plan ? AMOUNTS.cash : cashCreditCents(rawAmount, AMOUNTS.cash);
     if (typeof credit === 'string') return badRequest(credit);
-    const adm = await getAdmin(String(adminId));
+    const adm = await getAdmin(adminId);
     if (!adm || !adm.active) return notFound('Admin not found');
     if (plan) {
       const blocked = await planBlocked(player.playerId, plan);
@@ -694,7 +755,7 @@ async function apiRouter(
     const player = await getPlayerByCognitoSub(claims.sub);
     await saveSubscription(subscription, {
       sub: claims.sub,
-      email: claims.email,
+      email: claims.emailVerified ? claims.email : undefined,
       playerId: player?.playerId,
       isAdmin: admin,
     });
@@ -756,6 +817,7 @@ async function apiRouter(
     const player = await getPlayerByCognitoSub(claims.sub);
     if (!player) return notFound("We couldn’t find your player profile. Sign out and back in, or ask an admin.");
     await setPlayerPin(player.playerId, hashSecret(String(pin)));
+    await clearPinFailures(player.playerId).catch(() => {});
     return ok({ updated: true });
   }
 
@@ -794,13 +856,19 @@ async function apiRouter(
 
   // POST /api/admin/players  { name, email?, phone?, pin? }
   if (path === '/api/admin/players' && m === 'POST') {
-    const { name, email, phone, pin } = parseBody(event);
+    const { name: rawName, email: rawEmail, phone: rawPhone, pin } = parseBody(event);
+    const name = cleanName(rawName);
     if (!name) return badRequest('Enter a name');
+    const email = rawEmail == null || rawEmail === '' ? undefined : cleanEmail(rawEmail);
+    if (email === null) return badRequest('That email address doesn’t look right');
+    const phone = typeof rawPhone === 'string' && rawPhone.trim() ? rawPhone.trim() : undefined;
+    if (phone && !/^\+?[\d\s().-]{7,20}$/.test(phone)) return badRequest('That phone number doesn’t look right');
+    if (pin != null && pin !== '' && !isPin(pin)) return badRequest('PIN must be 4–6 digits');
     const player = await createPlayer({
       name,
       email,
       phone,
-      pinHash: pin ? hashSecret(String(pin)) : undefined,
+      pinHash: pin != null && pin !== '' ? hashSecret(String(pin)) : undefined,
       approved: true, // added by an admin, so already vouched for
     });
     return created({ player: { playerId: player.playerId, name: player.name } });
@@ -828,25 +896,25 @@ async function apiRouter(
   }
 
   // POST /api/admin/players/{id}/charge  { amountCents, note? }
-  const chargeMatch = path.match(/^\/api\/admin\/players\/([^/]+)\/charge$/);
-  if (chargeMatch && m === 'POST') {
+  // POST /api/admin/players/{id}/credit  { amountCents, note? }  (manual adj.)
+  // Both are capped and leave an audit row (who, how much, note) on the player.
+  const adjustMatch = path.match(/^\/api\/admin\/players\/([a-f0-9]{24})\/(charge|credit)$/);
+  if (adjustMatch && m === 'POST') {
     const { amountCents, note } = parseBody(event);
     if (!Number.isInteger(amountCents) || amountCents <= 0) {
       return badRequest('Enter an amount greater than $0');
     }
-    const balance = await adjustBalance(chargeMatch[1], -amountCents);
-    return ok({ playerId: chargeMatch[1], balanceCents: balance, note });
-  }
-
-  // POST /api/admin/players/{id}/credit  { amountCents, note? }  (manual adj.)
-  const creditMatch = path.match(/^\/api\/admin\/players\/([^/]+)\/credit$/);
-  if (creditMatch && m === 'POST') {
-    const { amountCents } = parseBody(event);
-    if (!Number.isInteger(amountCents) || amountCents <= 0) {
-      return badRequest('Enter an amount greater than $0');
-    }
-    const balance = await adjustBalance(creditMatch[1], amountCents);
-    return ok({ playerId: creditMatch[1], balanceCents: balance });
+    if (amountCents > MAX_ADJUST_CENTS) return badRequest(`Enter at most $${MAX_ADJUST_CENTS / 100} at a time`);
+    const [, playerId, kind] = adjustMatch;
+    const cleanNote = typeof note === 'string' ? cleanName(note, 200) : undefined;
+    const balance = await adminAdjustBalance(
+      playerId,
+      kind === 'charge' ? -amountCents : amountCents,
+      { sub: claims.sub, name: claims.name || claims.email || 'Admin' },
+      cleanNote,
+    );
+    if (balance === null) return notFound('Player not found');
+    return ok({ playerId, balanceCents: balance, note: cleanNote });
   }
 
   // GET /api/admin/pending — payments awaiting confirmation, with names
@@ -879,8 +947,11 @@ async function apiRouter(
   // POST /api/admin/payments/{id}/confirm | /deny — cash only
   const settleMatch = path.match(/^\/api\/admin\/payments\/([a-f0-9]{24})\/(confirm|deny)$/);
   if (settleMatch && m === 'POST') {
-    const r = await adminSettle(settleMatch[1], settleMatch[2] === 'confirm' ? 'confirmed' : 'denied');
+    const r = await adminSettle(settleMatch[1], settleMatch[2] === 'confirm' ? 'confirmed' : 'denied', {
+      sub: claims.sub,
+    });
     if (r === 'notfound') return notFound('Payment not found');
+    if (r === 'self') return forbidden('You can’t confirm your own cash payment. Ask another admin to confirm it.');
     if (r === 'notcash') return badRequest('card payments are settled by Stripe');
     return ok({ result: r === 'already' ? 'already_handled' : settleMatch[2] === 'confirm' ? 'confirmed' : 'denied' });
   }
@@ -1018,20 +1089,22 @@ async function apiRouter(
 
   // POST /api/admin/admins  { name, email }
   if (path === '/api/admin/admins' && m === 'POST') {
-    const { name, email } = parseBody(event);
-    if (!name || !email) return badRequest('Enter a name and an email');
-    if (!EMAIL_RE.test(String(email))) return badRequest('That email address doesn’t look right');
-    const a = await createAdmin({ name: String(name), email: String(email).trim().toLowerCase() });
+    const b = parseBody(event);
+    const name = cleanName(b.name);
+    if (!name || !b.email) return badRequest('Enter a name and an email');
+    const email = cleanEmail(b.email);
+    if (!email) return badRequest('That email address doesn’t look right');
+    const a = await createAdmin({ name, email });
     return created({ admin: { adminId: a.adminId, name: a.name, email: a.email } });
   }
 
   // PUT /api/admin/admins/{id}/email  { email }
   const emailMatch = path.match(/^\/api\/admin\/admins\/([a-f0-9]{24})\/email$/);
   if (emailMatch && m === 'PUT') {
-    const { email } = parseBody(event);
-    if (!EMAIL_RE.test(String(email ?? ''))) return badRequest('That email address doesn’t look right');
+    const email = cleanEmail(parseBody(event).email);
+    if (!email) return badRequest('That email address doesn’t look right');
     try {
-      await setAdminEmail(emailMatch[1], String(email).trim().toLowerCase());
+      await setAdminEmail(emailMatch[1], email);
     } catch (err: any) {
       if (err?.name === 'ConditionalCheckFailedException') return notFound('Admin not found');
       throw err;
@@ -1049,10 +1122,10 @@ async function apiRouter(
   // Re-posting the same deviceId rotates (regenerates) its token.
   if (path === '/api/admin/kiosks' && m === 'POST') {
     const { deviceId, label } = parseBody(event);
-    if (!deviceId || !/^[a-zA-Z0-9][a-zA-Z0-9_-]{1,63}$/.test(String(deviceId))) {
+    if (typeof deviceId !== 'string' || !KIOSK_ID_RE.test(deviceId)) {
       return badRequest('Device ID must be 2–64 letters, digits, "_" or "-", for example court-kiosk-1');
     }
-    const result = await createKiosk(String(deviceId), String(label ?? ''));
+    const result = await createKiosk(deviceId, typeof label === 'string' ? label : '');
     return created(result); // { deviceId, label, token } — token shown once
   }
 

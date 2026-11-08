@@ -9,8 +9,9 @@ import { resolveToken, confirmPayment, denyPayment } from '../lib/payments.js';
 import { getPlayer } from '../lib/repo.js';
 
 function tokenFromPath(path: string): string | null {
-  const m = path.match(/^\/api\/confirm\/([^/]+)$/);
-  return m ? decodeURIComponent(m[1]) : null;
+  // Tokens are base64url (no escapes needed); anything else is not a token.
+  const m = path.match(/^\/api\/confirm\/([A-Za-z0-9_-]{20,64})$/);
+  return m ? m[1] : null;
 }
 
 export const handler = async (

@@ -26,11 +26,40 @@ const TYPES: Record<string, string> = {
 };
 const TEXT = new Set(['.html', '.js', '.css', '.json', '.svg', '.webmanifest', '.txt']);
 
+// Content-Security-Policy: scripts only from this site; the browser may talk to
+// this site, Cognito (sign-in) and the chat-photo bucket (uploads, images).
+// Stripe Checkout is a full-page redirect, so it needs no entry here.
+const region = process.env.AWS_REGION ?? 'us-west-2';
+const bucket = process.env.CHAT_BUCKET;
+const s3Hosts = bucket
+  ? `https://${bucket}.s3.${region}.amazonaws.com https://${bucket}.s3.amazonaws.com https://s3.${region}.amazonaws.com`
+  : '';
+const CSP = [
+  "default-src 'self'",
+  "script-src 'self'",
+  "style-src 'self' 'unsafe-inline'", // UI library injects <style> tags
+  `img-src 'self' data: blob: ${s3Hosts}`.trim(),
+  "font-src 'self' data:",
+  `connect-src 'self' https://cognito-idp.${region}.amazonaws.com https://cognito-identity.${region}.amazonaws.com ${s3Hosts}`.trim(),
+  "media-src 'self' blob:",
+  "worker-src 'self'",
+  "manifest-src 'self'",
+  "object-src 'none'",
+  "base-uri 'none'",
+  "form-action 'self'",
+  "frame-ancestors 'none'",
+  'upgrade-insecure-requests',
+].join('; ');
+
 const SECURITY_HEADERS = {
+  'content-security-policy': CSP,
   'x-content-type-options': 'nosniff',
   'referrer-policy': 'strict-origin-when-cross-origin',
   'x-frame-options': 'DENY',
   'strict-transport-security': 'max-age=31536000; includeSubDomains',
+  // Camera for the kiosk's QR pairing scanner; nothing else.
+  'permissions-policy': 'camera=(self), microphone=(), geolocation=(), payment=(), usb=()',
+  'cross-origin-opener-policy': 'same-origin',
 };
 
 function configJs(): string {
@@ -60,8 +89,19 @@ function serveFile(file: string, cacheControl: string): APIGatewayProxyResultV2 
   };
 }
 
+const notFound = (): APIGatewayProxyResultV2 => ({
+  statusCode: 404,
+  headers: { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-cache', ...SECURITY_HEADERS },
+  body: 'Not found',
+});
+
 export const handler = async (event: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> => {
-  const raw = decodeURIComponent(event.rawPath || '/');
+  let raw: string;
+  try {
+    raw = decodeURIComponent(event.rawPath || '/');
+  } catch {
+    return notFound(); // malformed %-escape
+  }
 
   if (raw === '/config.js') {
     return {
@@ -84,7 +124,7 @@ export const handler = async (event: APIGatewayProxyEventV2): Promise<APIGateway
       const immutable = raw.startsWith('/assets/');
       return serveFile(resolved, immutable ? 'public, max-age=31536000, immutable' : 'no-cache');
     }
-    return { statusCode: 404, headers: { 'content-type': 'text/plain' }, body: 'Not found' };
+    return notFound();
   }
 
   // SPA route → index.html (never cached, so new deploys show up immediately).

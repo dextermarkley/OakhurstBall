@@ -48,7 +48,18 @@ export interface Payment {
   status: PaymentStatus;
   /** Admin who must confirm a cash payment. */
   adminId?: string;
+  /**
+   * Legacy only: older cash payments stored their confirm-link token here. It is
+   * a capability (whoever holds it can confirm), so it is never sent to clients
+   * and new payments don't store it. See paymentView().
+   */
   confirmToken?: string;
+  /** sha256 of the confirm-link token: finds its TOKENH# row, can't confirm anything. */
+  confirmTokenHash?: string;
+  /** Who settled it: 'link' (emailed confirm link), 'admin:<sub>', 'stripe'. */
+  settledBy?: string;
+  /** Stripe reported a refund or a dispute on this card payment. */
+  reversed?: 'refunded' | 'disputed';
   /** Stripe Checkout session for card payments. */
   stripeSessionId?: string;
   /** Set when the payment buys a quarter/year pass instead of balance credit. */
@@ -67,6 +78,7 @@ export interface Payment {
 export interface KioskDevice {
   deviceId: string;
   label: string;
+  /** 'sha256:<hex>' (current) or scrypt 'salt:hash' (kiosks paired before the change). */
   deviceSecretHash: string;
   active: boolean;
   lastSeenAt?: string;

@@ -204,3 +204,70 @@ test('cash credit: anything else is rejected', () => {
     assert.equal(typeof cashCreditCents(bad), 'string', String(bad));
   }
 });
+
+// ── Security hardening ──
+import { paymentView, isSamePerson } from '../src/lib/views.js';
+import { cleanName, cleanEmail, isId, isPin, oneLine } from '../src/lib/text.js';
+import { hashToken, verifyToken, makeToken } from '../src/lib/crypto.js';
+
+test('payments shown to players never include the confirm token or table keys', () => {
+  const stored = {
+    PK: 'PLAYER#a', SK: 'PAYMENT#x', GSI1PK: 'PAYMENT_STATUS#pending', GSI1SK: 'x',
+    paymentId: 'p1', playerId: 'a', amountCents: 500, method: 'cash', status: 'pending',
+    adminId: 'ad', confirmToken: 'SECRET', checkoutUrl: 'https://checkout', stripeSessionId: 'cs_1',
+    createdAt: '2026-01-01T00:00:00Z',
+  };
+  const v = paymentView(stored);
+  const json = JSON.stringify(v);
+  for (const k of ['SECRET', 'PK', 'SK', 'GSI1', 'confirmToken', 'checkoutUrl', 'cs_1', 'adminId']) {
+    assert.equal(json.includes(k), false, k);
+  }
+  assert.equal(v.amountCents, 500);
+  assert.equal(v.status, 'pending');
+});
+
+test('same person: by account or by email, case-insensitive', () => {
+  assert.equal(isSamePerson({ cognitoSub: 's1' }, { cognitoSub: 's1' }), true);
+  assert.equal(isSamePerson({ email: 'A@x.org' }, { email: 'a@x.org ' }), true);
+  assert.equal(isSamePerson({ cognitoSub: 's1', email: 'a@x.org' }, { cognitoSub: 's2', email: 'b@x.org' }), false);
+  assert.equal(isSamePerson({}, {}), false);
+});
+
+test('names: invisible and bidi characters stripped, capped at 60', () => {
+  assert.equal(cleanName('  Steph\u202e  Curry\u200b\n'), 'Steph Curry');
+  assert.equal(cleanName('x'.repeat(500)).length, 60);
+  assert.equal(cleanName(42), '');
+  assert.equal(cleanName('\u200b\u202e'), '');
+  assert.equal(cleanName('Ｍｉｃｈａｅｌ'), 'Michael'); // NFKC
+});
+
+test('one-line titles: no CR/LF', () => {
+  assert.equal(oneLine('a\r\nBcc: x@y.z'), 'a Bcc: x@y.z');
+});
+
+test('emails: valid ones lower-cased, long or odd ones rejected fast', () => {
+  assert.equal(cleanEmail(' Dexter@Example.ORG '), 'dexter@example.org');
+  assert.equal(cleanEmail('a@b'), null);
+  assert.equal(cleanEmail(['a@b.co']), null);
+  const t = Date.now();
+  assert.equal(cleanEmail('a@' + '.'.repeat(50000) + ' '), null);
+  assert.ok(Date.now() - t < 200);
+});
+
+test('ids and PINs', () => {
+  assert.equal(isId('433e3475d9fb75ab207ced0a'), true);
+  assert.equal(isId(['433e3475d9fb75ab207ced0a']), false);
+  assert.equal(isPin('1234'), true);
+  assert.equal(isPin('123456'), true);
+  assert.equal(isPin('123'), false);
+  assert.equal(isPin('1'.repeat(100000)), false);
+  assert.equal(isPin({}), false);
+});
+
+test('kiosk tokens: fast hash verifies only the right token', () => {
+  const t = makeToken();
+  const h = hashToken(t);
+  assert.equal(verifyToken(t, h), true);
+  assert.equal(verifyToken(makeToken(), h), false);
+  assert.equal(verifyToken(t, 'salt:hash'), false);
+});

@@ -31,9 +31,12 @@ const playerId = hex(12);
 const cashAdminId = hex(12);
 const email = `agent-paynow-${hex(4)}@oakhurst-ball.org`;
 const password = `Aa1${hex(12)}`;
+// A second admin account does the confirming: nobody may confirm their own cash.
+const email2 = `agent-paynow-${hex(4)}@oakhurst-ball.org`;
 let A = {};
-const api = async (method, path, body) => {
-  const r = await fetch(`${BASE}/api${path}`, { method, headers: A, body: body ? JSON.stringify(body) : undefined });
+let B = {};
+const api = async (method, path, body, H = A) => {
+  const r = await fetch(`${BASE}/api${path}`, { method, headers: H, body: body ? JSON.stringify(body) : undefined });
   let j = null;
   try { j = await r.json(); } catch {}
   return { status: r.status, body: j };
@@ -53,6 +56,16 @@ try {
     ClientId: CLIENT, AuthFlow: 'USER_PASSWORD_AUTH', AuthParameters: { USERNAME: email, PASSWORD: password },
   }));
   A = { 'content-type': 'application/json', authorization: `Bearer ${auth.AuthenticationResult.IdToken}` };
+  await cognito.send(new AdminCreateUserCommand({
+    UserPoolId: POOL, Username: email2, MessageAction: 'SUPPRESS',
+    UserAttributes: [{ Name: 'email', Value: email2 }, { Name: 'email_verified', Value: 'true' }, { Name: 'name', Value: 'ZZ PayNow Admin' }],
+  }));
+  await cognito.send(new AdminSetUserPasswordCommand({ UserPoolId: POOL, Username: email2, Password: password, Permanent: true }));
+  await cognito.send(new AdminAddUserToGroupCommand({ UserPoolId: POOL, Username: email2, GroupName: 'admin' }));
+  const auth2 = await cognito.send(new InitiateAuthCommand({
+    ClientId: CLIENT, AuthFlow: 'USER_PASSWORD_AUTH', AuthParameters: { USERNAME: email2, PASSWORD: password },
+  }));
+  B = { 'content-type': 'application/json', authorization: `Bearer ${auth2.AuthenticationResult.IdToken}` };
   await ddb.send(new PutCommand({ TableName: TABLE, Item: {
     PK: `ADMIN#${cashAdminId}`, SK: 'PROFILE', adminId: cashAdminId, name: 'ZZ Test Cashier', active: true,
     GSI1PK: 'ADMIN', GSI1SK: 'zz test cashier', createdAt: new Date().toISOString(),
@@ -85,7 +98,9 @@ try {
   check('shows up in admin pending list', JSON.stringify(r.body).includes(paymentId), r.status);
 
   r = await api('POST', `/admin/payments/${paymentId}/confirm`);
-  check('admin confirms', r.status === 200, r);
+  check('the paying admin can’t confirm it themselves', r.status === 403, r);
+  r = await api('POST', `/admin/payments/${paymentId}/confirm`, undefined, B);
+  check('another admin confirms', r.status === 200, r);
   check('balance credited to $0', (await balance()) === 0, await balance());
 
   // ── Paying more than $5 cash, in $5 steps ──
@@ -95,7 +110,7 @@ try {
   check('cash over $200 rejected', r.status === 400, r);
   r = await api('POST', '/me/pay-cash', { adminId: cashAdminId, amountCents: 2000 });
   check('cash $20 → $20 pending', r.status === 201 && r.body.amountCents === 2000, r);
-  r = await api('POST', `/admin/payments/${r.body?.paymentId}/confirm`);
+  r = await api('POST', `/admin/payments/${r.body?.paymentId}/confirm`, undefined, B);
   check('confirmed $20 credits $20 (balance $20)', r.status === 200 && (await balance()) === 2000, await balance());
 
   r = await api('POST', '/me/pay-cash', { adminId: cashAdminId, plan: 'quarter', amountCents: 500 });
@@ -118,11 +133,13 @@ try {
     if (it.paymentId) {
       await ddb.send(new DeleteCommand({ TableName: TABLE, Key: { PK: `PAYREF#${it.paymentId}`, SK: 'REF' } }));
       if (it.confirmToken) await ddb.send(new DeleteCommand({ TableName: TABLE, Key: { PK: `TOKEN#${it.confirmToken}`, SK: 'TOKEN' } }));
+      if (it.confirmTokenHash) await ddb.send(new DeleteCommand({ TableName: TABLE, Key: { PK: `TOKENH#${it.confirmTokenHash}`, SK: 'TOKEN' } }));
     }
     await ddb.send(new DeleteCommand({ TableName: TABLE, Key: { PK: it.PK, SK: it.SK } }));
   }
   await ddb.send(new DeleteCommand({ TableName: TABLE, Key: { PK: `ADMIN#${cashAdminId}`, SK: 'PROFILE' } }));
   await cognito.send(new AdminDeleteUserCommand({ UserPoolId: POOL, Username: email })).catch(() => {});
+  await cognito.send(new AdminDeleteUserCommand({ UserPoolId: POOL, Username: email2 })).catch(() => {});
   console.log(`cleanup: removed ${items.Items?.length ?? 0} player item(s), cashier, cognito user`);
   console.log(failures ? `${failures} FAILED` : 'ALL PASSED');
   process.exit(failures ? 1 : 0);

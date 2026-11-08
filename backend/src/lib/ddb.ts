@@ -1,6 +1,9 @@
 // DynamoDB document client + key helpers for the single-table design.
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient } from '@aws-sdk/lib-dynamodb';
+import { createHash } from 'node:crypto';
+
+export const sha256 = (s: string) => createHash('sha256').update(s).digest('hex');
 
 const base = new DynamoDBClient({});
 export const ddb = DynamoDBDocumentClient.from(base, {
@@ -20,7 +23,10 @@ export const keys = {
     PK: `PLAYER#${playerId}`,
     SK: `PAYMENT#${iso}#${paymentId}`,
   }),
+  /** Legacy confirm-link row, keyed by the raw token (links sent before hashing). */
   token: (token: string) => ({ PK: `TOKEN#${token}`, SK: 'TOKEN' }),
+  /** Confirm-link row keyed by sha256(token): the table never holds a usable token. */
+  tokenHash: (sha: string) => ({ PK: `TOKENH#${sha}`, SK: 'TOKEN' }),
 };
 
 export const gsi = {

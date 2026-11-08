@@ -25,6 +25,8 @@ const BUCKET = process.env.CHAT_BUCKET ?? '';
 
 export const MAX_TEXT = 2000;
 export const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+export const MAX_UPLOADS_PER_DAY = 40;
+const MAX_POSTS_PER_MINUTE = 12;
 const PAGE = 50;
 const IMAGE_TYPES: Record<string, string> = {
   'image/jpeg': 'jpg',
@@ -120,6 +122,24 @@ export function checkUpload(contentType: unknown, size: unknown): string | null 
 
 /** A presigned POST the browser uses to upload one image straight to S3. */
 export async function uploadTicket(sub: string, contentType: string) {
+  // Daily cap per person, so one account can't fill the bucket.
+  const day = new Date().toISOString().slice(0, 10);
+  try {
+    await ddb.send(
+      new UpdateCommand({
+        TableName: TABLE,
+        Key: { PK: 'QUOTA', SK: `UPLOAD#${ownerDir(sub)}#${day}` },
+        UpdateExpression: 'ADD n :one SET expiresAt = :exp',
+        ConditionExpression: 'attribute_not_exists(n) OR n < :max',
+        ExpressionAttributeValues: { ':one': 1, ':max': MAX_UPLOADS_PER_DAY, ':exp': Math.floor(Date.now() / 1000) + 2 * 86400 },
+      }),
+    );
+  } catch (err: any) {
+    if (err?.name === 'ConditionalCheckFailedException') {
+      return { error: `You can post up to ${MAX_UPLOADS_PER_DAY} photos a day. Try again tomorrow.` };
+    }
+    throw err;
+  }
   const key = `chat/${ownerDir(sub)}/${newId()}.${IMAGE_TYPES[contentType]}`;
   const post = await createPresignedPost(s3, {
     Bucket: BUCKET,
@@ -144,6 +164,22 @@ export async function postMessage(input: {
 }): Promise<{ message?: ChatMessage; error?: string }> {
   const text = (input.text ?? '').trim();
   if (text.length > MAX_TEXT) return { error: `Messages are limited to ${MAX_TEXT} characters` };
+  // At most MAX_POSTS_PER_MINUTE per person (each post can notify everyone).
+  const minute = Math.floor(Date.now() / 60000);
+  try {
+    await ddb.send(
+      new UpdateCommand({
+        TableName: TABLE,
+        Key: { PK: 'QUOTA', SK: `POST#${ownerDir(input.sub)}#${minute}` },
+        UpdateExpression: 'ADD n :one SET expiresAt = :exp',
+        ConditionExpression: 'attribute_not_exists(n) OR n < :max',
+        ExpressionAttributeValues: { ':one': 1, ':max': MAX_POSTS_PER_MINUTE, ':exp': (minute + 2) * 60 },
+      }),
+    );
+  } catch (err: any) {
+    if (err?.name === 'ConditionalCheckFailedException') return { error: 'You’re sending messages too fast. Wait a moment.' };
+    throw err;
+  }
   let imageKey: string | undefined;
   if (input.imageKey) {
     const k = String(input.imageKey);
