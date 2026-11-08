@@ -648,7 +648,7 @@ function ContactLine({ p }: { p: any }) {
     return p.hasAccount ? <div className="text-xs text-brand">No contact details yet (asked at next sign-in)</div> : null;
   }
   return (
-    <div className="truncate text-xs text-muted-foreground">
+    <div className="text-xs break-words text-muted-foreground">
       {p.phone && tel(p.phone)}
       {p.emergencyPhone && (
         <>
@@ -811,12 +811,13 @@ function PlayersTab() {
               <TableBody>
                 {shown.map((p) => (
                   <TableRow key={p.playerId}>
-                    <TableCell>
-                      <div className="flex items-center gap-2.5">
+                    {/* Wraps on a phone, so Plan and Balance stay on screen. */}
+                    <TableCell className="whitespace-normal">
+                      <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
                         <Avatar className="size-8">
                           <AvatarFallback className="text-xs">{initials(p.name)}</AvatarFallback>
                         </Avatar>
-                        <div className="min-w-0">
+                        <div className="min-w-0 flex-1">
                           <span className="font-medium">{p.name}</span>
                           <ContactLine p={p} />
                         </div>

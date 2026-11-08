@@ -1,0 +1,16 @@
+{
+  "name": "oakhurst-e2e",
+  "private": true,
+  "type": "module",
+  "description": "Browser end-to-end tests. Run against alpha: npm test (see README.md)",
+  "scripts": {
+    "test": "playwright test"
+  },
+  "devDependencies": {
+    "@aws-sdk/client-cognito-identity-provider": "^3.670.0",
+    "@aws-sdk/client-dynamodb": "^3.670.0",
+    "@aws-sdk/client-ssm": "^3.1164.0",
+    "@aws-sdk/lib-dynamodb": "^3.670.0",
+    "@playwright/test": "1.64.0-alpha-1790635538000"
+  }
+}
