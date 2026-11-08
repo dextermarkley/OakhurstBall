@@ -33,6 +33,7 @@ import {
   createKiosk,
   listKiosks,
   deleteKiosk,
+  setPlayerApproved,
   clubDate,
   listAdminsDetailed,
   setAdminEmail,
@@ -417,7 +418,13 @@ async function communityRouter(
     return ok({ announcement: await currentAnnouncement() });
   }
 
-  // ── Chat ──
+  // ── Chat ── members only: an admin approves each sign-up first.
+  if (path.startsWith('/api/chat') && !admin) {
+    const me = await getPlayerByCognitoSub(claims.sub);
+    if (!me?.approved) {
+      return json(403, { error: 'not_approved', message: 'An admin needs to approve your account before you can use the chat.' });
+    }
+  }
   // GET  /api/chat                       newest page
   // GET  /api/chat?before=<cursor>       older page
   // GET  /api/chat?after=<cursor>&since=<iso>   poll: new messages + deletions
@@ -744,8 +751,30 @@ async function apiRouter(
       email,
       phone,
       pinHash: pin ? hashSecret(String(pin)) : undefined,
+      approved: true, // added by an admin, so already vouched for
     });
     return created({ player: { playerId: player.playerId, name: player.name } });
+  }
+
+  // POST /api/admin/players/{id}/approve { approved: boolean } — members-only access (chat)
+  const approveMatch = path.match(/^\/api\/admin\/players\/([a-f0-9]{24})\/approve$/);
+  if (approveMatch && m === 'POST') {
+    const { approved } = parseBody(event);
+    if (typeof approved !== 'boolean') return badRequest('approved must be true or false');
+    const okd = await setPlayerApproved(approveMatch[1], approved, claims.name || claims.email || 'Admin');
+    if (!okd) return notFound('player');
+    if (approved) {
+      const p = await getPlayer(approveMatch[1]);
+      if (p?.cognitoSub) {
+        await sendPush(toUser(p.cognitoSub), {
+          title: 'You’re approved!',
+          body: 'An admin approved your Oakhurst Basketball account. The club chat is open to you now.',
+          url: '/chat',
+          tag: 'approved',
+        });
+      }
+    }
+    return ok({ approved });
   }
 
   // POST /api/admin/players/{id}/charge  { amountCents, note? }

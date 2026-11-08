@@ -76,6 +76,7 @@ async function makeUser(label, { admin = false } = {}) {
   await ddb.send(new PutCommand({ TableName: TABLE, Item: {
     PK: `PLAYER#${playerId}`, SK: 'PROFILE', playerId, name, balanceCents: 0, active: true, createdAt: now, updatedAt: now,
     GSI1PK: 'PLAYER', GSI1SK: name.toLowerCase(), cognitoSub: sub,
+    approved: true, // chat is members-only
   } }));
   const a = await cognito.send(new InitiateAuthCommand({
     ClientId: CLIENT, AuthFlow: 'USER_PASSWORD_AUTH', AuthParameters: { USERNAME: email, PASSWORD: password },

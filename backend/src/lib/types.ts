@@ -16,6 +16,8 @@ export interface Player {
   balanceCents: number;
   cognitoSub?: string;
   active: boolean;
+  /** Approved by an admin for members-only features (the chat). */
+  approved?: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -79,4 +81,9 @@ export interface PublicPlayer {
   waiverVersion?: string;
   rulesVersion?: string;
   agreedAt?: string;
+  approved?: boolean;
+  email?: string;
+  createdAt?: string;
+  /** Signed up with an account (vs. added by an admin for the kiosk). */
+  hasAccount?: boolean;
 }

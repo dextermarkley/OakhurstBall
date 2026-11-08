@@ -18,6 +18,7 @@ import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { ddb, TABLE } from './ddb.js';
 import { newId } from './crypto.js';
 import { sendPush } from './push.js';
+import { approvedSubs } from './repo.js';
 
 const s3 = new S3Client({});
 const BUCKET = process.env.CHAT_BUCKET ?? '';
@@ -260,6 +261,13 @@ export async function notifyChat(msg: ChatMessage) {
   );
   wanted.delete(msg.sub);
   if (!wanted.size) return;
+  // Only members who can actually open the chat: admins and approved players.
+  const approved = await approvedSubs();
   const body = msg.text ? (msg.text.length > 140 ? `${msg.text.slice(0, 139)}…` : msg.text) : 'Sent a photo';
-  await sendPush((s) => wanted.has(s.sub), { title: `${msg.name} · Chat`, body, url: '/chat', tag: 'chat' });
+  await sendPush((s) => wanted.has(s.sub) && (!!s.isAdmin || approved.has(s.sub)), {
+    title: `${msg.name} · Chat`,
+    body,
+    url: '/chat',
+    tag: 'chat',
+  });
 }

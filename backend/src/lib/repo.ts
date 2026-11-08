@@ -39,6 +39,8 @@ export async function createPlayer(input: {
   phone?: string;
   pinHash?: string;
   cognitoSub?: string;
+  /** Approved members can use the chat. Self sign-ups start unapproved. */
+  approved?: boolean;
 }): Promise<Player> {
   const playerId = newId();
   const player: Player = {
@@ -50,6 +52,7 @@ export async function createPlayer(input: {
     cognitoSub: input.cognitoSub,
     balanceCents: 0,
     active: true,
+    approved: !!input.approved,
     createdAt: nowIso(),
     updatedAt: nowIso(),
   };
@@ -85,6 +88,10 @@ export async function listPlayers(): Promise<PublicPlayer[]> {
       waiverVersion: i.waiverVersion,
       rulesVersion: i.rulesVersion,
       agreedAt: i.agreedAt,
+      approved: !!i.approved,
+      email: i.email,
+      createdAt: i.createdAt,
+      hasAccount: !!i.cognitoSub,
     }))
     .sort((a, b) => a.name.localeCompare(b.name));
 }
@@ -101,6 +108,51 @@ export async function adjustBalance(playerId: string, deltaCents: number): Promi
     }),
   );
   return (r.Attributes as any)?.balanceCents ?? 0;
+}
+
+/** Approve (or un-approve) a player for members-only features like the chat. */
+export async function setPlayerApproved(playerId: string, approved: boolean, byName: string): Promise<boolean> {
+  try {
+    await ddb.send(
+      new UpdateCommand({
+        TableName: TABLE,
+        Key: keys.playerProfile(playerId),
+        UpdateExpression: approved
+          ? 'SET approved = :t, approvedAt = :now, approvedBy = :by, updatedAt = :now'
+          : 'SET approved = :f, updatedAt = :now REMOVE approvedAt, approvedBy',
+        ConditionExpression: 'attribute_exists(PK)',
+        ExpressionAttributeValues: approved
+          ? { ':t': true, ':now': nowIso(), ':by': byName }
+          : { ':f': false, ':now': nowIso() },
+      }),
+    );
+    return true;
+  } catch (err: any) {
+    if (err?.name === 'ConditionalCheckFailedException') return false;
+    throw err;
+  }
+}
+
+/** Cognito subs of approved players (for chat notifications). */
+export async function approvedSubs(): Promise<Set<string>> {
+  const out = new Set<string>();
+  let start: Record<string, any> | undefined;
+  do {
+    const r = await ddb.send(
+      new QueryCommand({
+        TableName: TABLE,
+        IndexName: GSI1,
+        KeyConditionExpression: 'GSI1PK = :pk',
+        FilterExpression: 'approved = :t',
+        ExpressionAttributeValues: { ':pk': 'PLAYER', ':t': true },
+        ProjectionExpression: 'cognitoSub',
+        ExclusiveStartKey: start,
+      }),
+    );
+    for (const i of r.Items ?? []) if (i.cognitoSub) out.add(i.cognitoSub);
+    start = r.LastEvaluatedKey;
+  } while (start);
+  return out;
 }
 
 export async function setPlayerPin(playerId: string, pinHash: string): Promise<void> {

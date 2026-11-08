@@ -276,7 +276,8 @@ export class OakhurstStack extends cdk.Stack {
 
     // Web Push VAPID keys (also created outside CDK; see docs/notifications.md).
     // Both functions settle payments, and settling notifies the player.
-    for (const fn of [apiFn, confirmFn]) {
+    // The sign-up trigger notifies admins of new accounts.
+    for (const fn of [apiFn, confirmFn, postAuthFn]) {
       fn.addToRolePolicy(
         new iam.PolicyStatement({
           actions: ['ssm:GetParameter'],
@@ -389,6 +390,10 @@ export class OakhurstStack extends cdk.Stack {
     const appBaseUrl = apex ? `https://${apex}` : httpApi.apiEndpoint;
     apiFn.addEnvironment('APP_BASE_URL', appBaseUrl); // used in the SMS confirm link
     confirmFn.addEnvironment('APP_BASE_URL', appBaseUrl);
+    // Only with a custom domain: the fallback is the API endpoint, which would make
+    // the Cognito trigger depend on the API (a CloudFormation cycle). push.ts falls
+    // back to a mailto: VAPID subject without it.
+    if (apex) postAuthFn.addEnvironment('APP_BASE_URL', appBaseUrl);
 
     // ───────────────────────────── Outputs ───────────────────────────────────
     new cdk.CfnOutput(this, 'SiteUrl', { value: appBaseUrl });

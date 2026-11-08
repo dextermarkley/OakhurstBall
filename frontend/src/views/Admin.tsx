@@ -21,7 +21,9 @@ import {
   Tablet,
   Ticket,
   Trash2,
+  UserCheck,
   UserPlus,
+  UserX,
   Users,
 } from 'lucide-react';
 import { api, type AdminSession, type Attendee, type Plan, type PlanOffer } from '@/api';
@@ -76,7 +78,13 @@ type TabId = 'overview' | 'sessions' | 'players' | 'payments' | 'expenses' | 'ad
 function AdminInner({ signOut }: { signOut: () => void }) {
   const [me, setMe] = useState<any>(null);
   const [error, setError] = useState('');
-  const [tab, setTab] = useState<TabId>('overview');
+  // ?tab=players (e.g. from the "New sign-up" notification) opens that tab.
+  const [tab, setTab] = useState<TabId>(() => {
+    const t = new URLSearchParams(window.location.search).get('tab');
+    return (['overview', 'sessions', 'players', 'payments', 'expenses', 'admins', 'kiosks'] as const).includes(t as TabId)
+      ? (t as TabId)
+      : 'overview';
+  });
 
   useEffect(() => {
     api.me().then(setMe).catch((e) => setError(e.message));
@@ -628,6 +636,27 @@ function PlayersTab() {
   }, [load]);
 
   const shown = (players ?? []).filter((p) => p.name.toLowerCase().includes(q.trim().toLowerCase()));
+  // Self sign-ups waiting for an admin (players added by an admin are approved already).
+  const pending = (players ?? []).filter((p) => p.hasAccount && !p.approved);
+
+  async function approve(p: any, approved: boolean) {
+    if (!approved) {
+      const ok = await confirm({
+        title: `Remove ${p.name}'s chat access?`,
+        description: 'They keep their account, balance and check-ins, but can’t open the chat until approved again.',
+        confirmLabel: 'Remove access',
+        destructive: true,
+      });
+      if (!ok) return;
+    }
+    try {
+      await api.approvePlayer(p.playerId, approved);
+      toast.success(approved ? `${p.name} is approved. They can use the chat now.` : `${p.name} can no longer use the chat.`);
+      load();
+    } catch (e: any) {
+      toast.error(e.message);
+    }
+  }
 
   async function recordPass(p: any, plan: Plan) {
     const o = plans.find((x) => x.plan === plan)!;
@@ -657,6 +686,36 @@ function PlayersTab() {
           </Button>
         }
       />
+      {pending.length > 0 && (
+        <Card className="border-brand/30">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <UserCheck className="size-4 text-brand" /> {pending.length} new sign-up{pending.length === 1 ? '' : 's'} waiting for approval
+            </CardTitle>
+            <CardDescription>Approved members can see and post in the club chat. Everything else works without approval.</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {pending.map((p) => (
+              <div key={p.playerId} className="flex flex-wrap items-center gap-3 rounded-lg border p-3">
+                <Avatar className="size-8">
+                  <AvatarFallback className="text-xs">{initials(p.name)}</AvatarFallback>
+                </Avatar>
+                <div className="min-w-0 flex-1">
+                  <div className="truncate font-medium">{p.name}</div>
+                  <div className="truncate text-xs text-muted-foreground">
+                    {p.email ?? 'No email'}
+                    {p.createdAt && ` · joined ${longDateOf(p.createdAt)}`}
+                  </div>
+                </div>
+                <Button size="sm" onClick={() => approve(p, true)}>
+                  <UserCheck /> Approve
+                </Button>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
+
       <Card>
         <CardHeader>
           <div className="relative w-full sm:max-w-xs">
@@ -701,6 +760,11 @@ function PlayersTab() {
                             {p.agreedAt ? 'Waiver outdated' : 'No waiver'}
                           </Badge>
                         )}
+                        {p.hasAccount && !p.approved && (
+                          <Badge variant="outline" className="text-muted-foreground" title="Can’t use the chat until approved">
+                            Not approved
+                          </Badge>
+                        )}
                       </div>
                     </TableCell>
                     <TableCell>
@@ -728,6 +792,16 @@ function PlayersTab() {
                           <DropdownMenuItem onClick={() => setCharging(p)}>
                             <Banknote /> Charge…
                           </DropdownMenuItem>
+                          {p.hasAccount &&
+                            (p.approved ? (
+                              <DropdownMenuItem onClick={() => approve(p, false)}>
+                                <UserX /> Remove chat access
+                              </DropdownMenuItem>
+                            ) : (
+                              <DropdownMenuItem onClick={() => approve(p, true)}>
+                                <UserCheck /> Approve for chat
+                              </DropdownMenuItem>
+                            ))}
                           <DropdownMenuSeparator />
                           <DropdownMenuGroup>
                             <DropdownMenuLabel>Record a pass paid outside the app</DropdownMenuLabel>

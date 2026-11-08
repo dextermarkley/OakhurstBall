@@ -2,7 +2,7 @@
 // on screen; people who opt in get a notification for new messages (the server
 // skips anyone who has the chat open).
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
-import { Bell, BellOff, ImagePlus, Loader2, MessagesSquare, SendHorizontal, Trash2, X } from 'lucide-react';
+import { Bell, BellOff, Hourglass, ImagePlus, Loader2, MessagesSquare, SendHorizontal, Trash2, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { api, type ChatMessage } from '@/api';
 import { AppShell, type ShellUser } from '@/components/app-shell';
@@ -139,6 +139,22 @@ function ChatRoom({ isAdmin }: { isAdmin: boolean }) {
     } catch (e: any) {
       toast.error(e.message);
     }
+  }
+
+  if (error === 'not_approved') {
+    return (
+      <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 rounded-xl border bg-card p-8 text-center">
+        <div className="flex size-12 items-center justify-center rounded-full bg-brand/10 text-brand">
+          <Hourglass className="size-5" />
+        </div>
+        <div className="text-lg font-semibold">Waiting for approval</div>
+        <p className="max-w-sm text-sm text-muted-foreground">
+          The club chat is for approved members. An admin has been told you signed up and will approve your account soon. Everything
+          else, like checking in and paying, works now.
+        </p>
+        <p className="text-xs text-muted-foreground">Turn on notifications and we’ll let you know when you’re approved.</p>
+      </div>
+    );
   }
 
   const onSent = (m: ChatMessage) => {
