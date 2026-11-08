@@ -77,3 +77,39 @@ This makes double-confirmation impossible (the condition fails the second time).
 | All admins (cash picker)               | Query GSI1 `ADMIN`                      |
 | Admin's pending-confirmation queue     | Query GSI1 `PAYMENT_STATUS#pending`     |
 | Resolve a magic-link token             | Get `TOKEN#token / TOKEN`               |
+
+## Indexes
+
+- `GSI1` (`GSI1PK`, `GSI1SK`, all attributes): lists such as players A–Z,
+  sessions by date, payments by status and date, passes per period.
+- `BySub` (`cognitoSub`, keys only, sparse): Cognito account → player/admin
+  key. Used for the "who is calling?" lookup on almost every request.
+
+## Pagination and growth
+
+Every Query follows DynamoDB pagination (`backend/src/lib/page.ts`):
+
+- `queryAll` follows `LastEvaluatedKey` for server-side lists that stay small
+  (admins, one session's attendees, this period's passes, the pending queue).
+  It stops with an error after 50 pages instead of growing silently.
+- `queryPage` returns one page plus `nextCursor` for lists sent to browsers. A
+  cursor is the base64url `LastEvaluatedKey`, checked to belong to the same
+  partition before use (a bad one is a 400).
+
+Paged endpoints (pass `?cursor=`; `nextCursor` is null on the last page):
+
+| Endpoint                | Page | Client                                  |
+|-------------------------|------|-----------------------------------------|
+| `/api/admin/players`    | 100  | follows all pages (search and totals)   |
+| `/api/kiosk/players`    | 200  | follows all pages (picker)              |
+| `/api/admin/pending`    | 50   | follows all pages (work queue)          |
+| `/api/admin/sessions`   | 25   | "Load older sessions"                   |
+| `/api/me/checkins`      | 25   | "Show older" (first page in `/api/me/balance`) |
+| `/api/me/payments`      | 25   | "Show older" (first page in `/api/me/balance`) |
+| `/api/chat`             | 50   | loads older messages on scroll          |
+
+Totals never come from reading a whole history: a player's all-time check-in
+count is `checkinCount` on the profile (each check-in ADDs 1; older profiles
+get an exact count once, marked `checkinCountV`), and the six-month attendance
+chart reads only that date range. `test/live-scale.mjs` seeds three years of
+history on alpha and checks all of the above.
