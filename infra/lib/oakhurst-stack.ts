@@ -422,11 +422,12 @@ export class OakhurstStack extends cdk.Stack {
       }),
     };
 
+    const routes: apigwv2.HttpRoute[] = [];
     const apiIntegration = new apigwv2_integ.HttpLambdaIntegration('ApiInteg', apiFn);
     const confirmIntegration = new apigwv2_integ.HttpLambdaIntegration('ConfirmInteg', confirmFn);
 
     // Player/admin routes — Cognito JWT required.
-    httpApi.addRoutes({
+    routes.push(...httpApi.addRoutes({
       path: '/api/{proxy+}',
       methods: [
         apigwv2.HttpMethod.GET,
@@ -436,32 +437,36 @@ export class OakhurstStack extends cdk.Stack {
       ],
       integration: apiIntegration,
       authorizer: jwtAuthorizer,
-    });
+    }));
     // Kiosk routes — no JWT; the handler checks the x-kiosk-device/x-kiosk-token pair.
     // More specific than /api/{proxy+}, so API Gateway routes here first.
-    httpApi.addRoutes({
+    routes.push(...httpApi.addRoutes({
       path: '/api/kiosk/{proxy+}',
       methods: [apigwv2.HttpMethod.GET, apigwv2.HttpMethod.POST],
       integration: apiIntegration,
-    });
+    }));
     // Stripe return page + webhook — public; both re-verify with Stripe.
-    httpApi.addRoutes({
+    routes.push(...httpApi.addRoutes({
       path: '/api/stripe/{proxy+}',
       methods: [apigwv2.HttpMethod.GET, apigwv2.HttpMethod.POST],
       integration: apiIntegration,
-    });
+    }));
     // Chat images for <img> tags (no token possible) — random ids, signed redirects.
-    httpApi.addRoutes({
+    routes.push(...httpApi.addRoutes({
       path: '/api/media/{proxy+}',
       methods: [apigwv2.HttpMethod.GET],
       integration: apiIntegration,
-    });
+    }));
     // Magic-link confirm — the unguessable token in the path is the auth.
-    httpApi.addRoutes({
+    routes.push(...httpApi.addRoutes({
       path: '/api/confirm/{proxy+}',
       methods: [apigwv2.HttpMethod.GET, apigwv2.HttpMethod.POST],
       integration: confirmIntegration,
-    });
+    }));
+
+    // Route throttles name routes, so the stage must be created after them
+    // (on a brand-new stack CloudFormation would otherwise make it first).
+    for (const r of routes) apiStage.node.addDependency(r);
 
     // ───────────────────── API Gateway custom domain ──────────────────────────
     if (apex && hostedZone && certificate) {
