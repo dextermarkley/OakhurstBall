@@ -128,6 +128,12 @@ function SessionCard({ s, onChange }: { s: MySession; onChange: () => void }) {
   const [ask, setAsk] = useState<CheckinResult | null>(null);
 
   function report(r: CheckinResult) {
+    if (r.result === 'needs_agreement') {
+      // The waiver or rules changed while this page was open: reload to sign them.
+      toast.info('Please sign the updated waiver and club rules first.');
+      setTimeout(() => window.location.reload(), 1200);
+      return;
+    }
     if (r.result === 'no_session') toast.error('The gym just closed.');
     else if (r.result === 'already') toast.info("You're already checked in.");
     else if (r.result !== 'checked_in') {

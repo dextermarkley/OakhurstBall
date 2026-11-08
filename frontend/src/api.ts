@@ -501,6 +501,28 @@ export const kiosk = {
       kioskHeaders(),
     );
   },
+  async agreements() {
+    return req<{ waiver: AgreementDoc; rules: AgreementDoc }>('/api/kiosk/agreements', {}, kioskHeaders());
+  },
+  async signAgreements(
+    playerId: string,
+    pin: string,
+    b: {
+      waiverVersion: string;
+      rulesVersion: string;
+      agreeRules: boolean;
+      agreeWaiver: boolean;
+      signedName: string;
+      adult: boolean;
+      guardianName?: string;
+    },
+  ) {
+    return req<{ current: boolean; agreedAt: string }>(
+      '/api/kiosk/agreements',
+      { method: 'POST', body: JSON.stringify({ playerId, pin, ...b }) },
+      kioskHeaders(),
+    );
+  },
   async payCard(playerId: string, pin: string, plan?: Plan) {
     return req<{ paymentId: string; amountCents: number; checkoutUrl: string }>(
       '/api/kiosk/pay',
@@ -538,7 +560,9 @@ export const kiosk = {
  * no_session: gym closed.
  */
 export interface CheckinResult {
-  result: 'checked_in' | 'already' | 'needs_payment' | 'limit' | 'no_session';
+  /** needs_agreement: hasn't signed the current waiver + rules yet (not checked in). */
+  result: 'checked_in' | 'already' | 'needs_payment' | 'limit' | 'no_session' | 'needs_agreement';
+  signedBefore?: boolean;
   name: string;
   feeCents?: number;
   balanceCents?: number;

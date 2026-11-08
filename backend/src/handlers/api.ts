@@ -303,9 +303,38 @@ async function kioskRouter(
     if (!player.pinHash || !verifySecret(String(pin), player.pinHash)) {
       return unauthorized('wrong PIN');
     }
+    // No check-in until the current waiver + club rules are signed (they can
+    // sign right here on the kiosk: POST /kiosk/agreements).
+    if (!isCurrent(player as any)) {
+      return ok({ result: 'needs_agreement', name: player.name, signedBefore: !!(player as any).agreedAt });
+    }
     const { mode } = parseBody(event);
     const r = await sessionCheckIn(player, AMOUNTS.dailyFee, 'kiosk', mode === 'defer' ? 'defer' : 'auto');
     return checkInResponse(player.name, r);
+  }
+
+  // GET /kiosk/agreements — the waiver + rules text to show for signing
+  if (path === '/kiosk/agreements' && m === 'GET') {
+    return ok({ waiver: WAIVER, rules: RULES });
+  }
+
+  // POST /kiosk/agreements { playerId, pin, waiverVersion, rulesVersion, agreeRules,
+  //                          agreeWaiver, signedName, adult, guardianName? }
+  // A player signs on the kiosk (e.g. one an admin added who never uses the app).
+  if (path === '/kiosk/agreements' && m === 'POST') {
+    const b = parseBody(event);
+    if (!b.playerId || !b.pin) return badRequest('playerId and pin required');
+    const player = await getPlayer(String(b.playerId));
+    if (!player) return notFound('player');
+    if (!player.pinHash || !verifySecret(String(b.pin), player.pinHash)) return unauthorized('wrong PIN');
+    const { sig, error } = checkSignature(b);
+    if (error) return badRequest(error);
+    const agreedAt = await recordAgreements(player.playerId, sig!, {
+      sub: `kiosk:${deviceId}`,
+      ip: event.requestContext?.http?.sourceIp,
+      userAgent: event.requestContext?.http?.userAgent,
+    });
+    return ok({ current: true, agreedAt });
   }
 
   // POST /kiosk/pay  { playerId, pin, method: 'card' | 'cash', adminId?, plan? }
@@ -579,6 +608,9 @@ async function apiRouter(
   if (path === '/api/me/checkin' && m === 'POST') {
     const player = await getPlayerByCognitoSub(claims.sub);
     if (!player) return notFound('no linked player profile');
+    if (!isCurrent(player as any)) {
+      return ok({ result: 'needs_agreement', name: player.name, signedBefore: !!(player as any).agreedAt });
+    }
     const { mode } = parseBody(event);
     const r = await sessionCheckIn(player, AMOUNTS.dailyFee, 'player', mode === 'defer' ? 'defer' : 'auto');
     return checkInResponse(player.name, r);

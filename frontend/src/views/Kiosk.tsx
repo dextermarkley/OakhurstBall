@@ -24,8 +24,9 @@ import {
   Smartphone,
   Ticket,
   TriangleAlert,
+  X,
 } from 'lucide-react';
-import { kiosk, type CheckinResult, type Plan, type PlanOffer, type Session } from '@/api';
+import { kiosk, type AgreementDoc, type CheckinResult, type Plan, type PlanOffer, type Session } from '@/api';
 import { LogoMark } from '@/components/brand';
 import { PinPad } from '@/components/pin-pad';
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -38,6 +39,7 @@ import { balanceText, initials, money, planName, timeOf, ymdText } from '@/lib/f
 import { cn } from '@/lib/utils';
 import { clearPairing, parsePairing, savePairing } from '@/pairing';
 import { APP_VERSION, applyUpdate, useUpdateReady } from '@/pwa';
+import { SignScreen } from './Agreements';
 
 // Loaded only when the Scan button is tapped (keeps jsQR out of the main bundle).
 const QrScanner = lazy(() => import('./QrScanner').then((m) => ({ default: m.QrScanner })));
@@ -53,7 +55,7 @@ function pairFromUrl(): boolean {
 
 const PAIRING_ERRORS = new Set(['unknown kiosk', 'bad kiosk token', 'missing kiosk credentials']);
 
-type Step = 'provision' | 'pick' | 'pin' | 'result' | 'pay' | 'cash' | 'card' | 'cashwait' | 'done';
+type Step = 'provision' | 'pick' | 'pin' | 'agree' | 'result' | 'pay' | 'cash' | 'card' | 'cashwait' | 'done';
 /** What the player chose to pay for: drop-in credit (no plan) or a pass. */
 type Purchase = { plan?: Plan; amountCents: number; what: string };
 type PlayerLite = { playerId: string; name: string; negative: boolean };
@@ -82,6 +84,7 @@ export function Kiosk() {
   const [cash, setCash] = useState<{ paymentId: string; adminName: string; emailed: boolean } | null>(null);
   const [buying, setBuying] = useState<Purchase | null>(null);
   const [inGym, setInGym] = useState(false); // checked in during this flow
+  const [agreeDocs, setAgreeDocs] = useState<{ waiver: AgreementDoc; rules: AgreementDoc; changed: boolean } | null>(null);
 
   // Unattended kiosk: take a new version as soon as nobody is mid-check-in.
   const updateReady = useUpdateReady();
@@ -165,7 +168,8 @@ export function Kiosk() {
   // Idle reset.
   useEffect(() => {
     if (step === 'pick' || step === 'provision') return;
-    const ms = step === 'card' || step === 'cashwait' ? WAIT_MS : step === 'done' ? 6_000 : IDLE_MS;
+    // Reading and signing the waiver takes a while: give it 5 minutes of no touches.
+    const ms = step === 'card' || step === 'cashwait' ? WAIT_MS : step === 'done' ? 6_000 : step === 'agree' ? 5 * 60_000 : IDLE_MS;
     const t = setTimeout(reset, ms);
     return () => clearTimeout(t);
   }, [step, tick, reset]);
@@ -247,6 +251,12 @@ export function Kiosk() {
     try {
       const r = await kiosk.checkin(selected.playerId, entered);
       setPin(entered);
+      if (r.result === 'needs_agreement') {
+        // Sign the waiver + rules here first; check-in continues right after.
+        setAgreeDocs({ ...(await kiosk.agreements()), changed: !!r.signedBefore });
+        setStep('agree');
+        return;
+      }
       handleCheckin(r);
     } catch (e: any) {
       setError(e.message === 'wrong PIN' ? 'Wrong PIN. Try again.' : e.message);
@@ -358,6 +368,33 @@ export function Kiosk() {
   };
 
   // ── One-time pairing of this kiosk ──
+  // ── Waiver + club rules, signed on the kiosk before the first check-in ──
+  if (step === 'agree' && selected && agreeDocs) {
+    return (
+      <SignScreen
+        waiver={agreeDocs.waiver}
+        rules={agreeDocs.rules}
+        changed={agreeDocs.changed}
+        heading={`${first(selected.name)}, one quick thing before you play`}
+        submit={(b) => kiosk.signAgreements(selected.playerId, pin, b)}
+        onActivity={() => setTick((t) => t + 1)}
+        onSigned={async () => {
+          setAgreeDocs(null);
+          setBusy(true);
+          try {
+            handleCheckin(await kiosk.checkin(selected.playerId, pin));
+          } catch (e: any) {
+            setError(e.message);
+            setStep('pick');
+          } finally {
+            setBusy(false);
+          }
+        }}
+        exit={{ label: 'Cancel', icon: <X />, onClick: reset }}
+      />
+    );
+  }
+
   if (step === 'provision') {
     return (
       <Screen>

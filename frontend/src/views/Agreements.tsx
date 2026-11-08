@@ -37,8 +37,20 @@ export function AgreementsGate({ children, onSignOut }: { children: ReactNode; o
       </div>
     );
   }
-  return <SignScreen s={s} onSigned={() => setS({ ...s, current: true })} onSignOut={onSignOut} />;
+  return (
+    <SignScreen
+      waiver={s.waiver}
+      rules={s.rules}
+      changed={!!s.signed}
+      defaultName={s.signed?.signedName}
+      submit={(b) => api.signAgreements(b)}
+      onSigned={() => setS({ ...s, current: true })}
+      exit={{ label: 'Sign out', icon: <LogOut />, onClick: onSignOut }}
+    />
+  );
 }
+
+export type SignatureBody = Parameters<typeof api.signAgreements>[0];
 
 const NAME = z
   .string()
@@ -63,17 +75,43 @@ const schema = z
   });
 type Values = z.infer<typeof schema>;
 
-function SignScreen({ s, onSigned, onSignOut }: { s: AgreementsStatus; onSigned: () => void; onSignOut: () => void }) {
-  const changed = !!s.signed; // signed before, but a document has a new version
+/**
+ * The waiver + rules signing screen. Used after sign-in (AgreementsGate) and on
+ * the kiosk, which submits through its own device-authenticated endpoint.
+ */
+export function SignScreen({
+  waiver,
+  rules,
+  changed,
+  defaultName,
+  submit: send,
+  onSigned,
+  exit,
+  heading,
+  onActivity,
+}: {
+  waiver: AgreementDoc;
+  rules: AgreementDoc;
+  /** Signed before, but a document has a new version. */
+  changed: boolean;
+  defaultName?: string;
+  submit: (b: SignatureBody) => Promise<unknown>;
+  onSigned: () => void;
+  exit: { label: string; icon: ReactNode; onClick: () => void };
+  heading?: string;
+  /** Called on any touch/typing (the kiosk uses it to keep its idle timer from resetting). */
+  onActivity?: () => void;
+}) {
+  const s = { waiver, rules };
   const form = useForm<Values>({
     resolver: zodResolver(schema),
-    defaultValues: { agreeRules: false, adult: undefined as any, signedName: s.signed?.signedName ?? '', guardianName: '', agreeWaiver: false },
+    defaultValues: { agreeRules: false, adult: undefined as any, signedName: defaultName ?? '', guardianName: '', agreeWaiver: false },
   });
   const adult = form.watch('adult');
 
   const submit = form.handleSubmit(async (v) => {
     try {
-      await api.signAgreements({
+      await send({
         waiverVersion: s.waiver.version,
         rulesVersion: s.rules.version,
         agreeRules: v.agreeRules,
@@ -91,20 +129,27 @@ function SignScreen({ s, onSigned, onSignOut }: { s: AgreementsStatus; onSigned:
   });
 
   return (
-    <div className="safe-top safe-bottom min-h-dvh bg-gradient-to-b from-secondary/60 to-background px-4 py-8">
+    <div
+      className="safe-top safe-bottom min-h-dvh bg-gradient-to-b from-secondary/60 to-background px-4 py-8"
+      onPointerDown={onActivity}
+      onKeyDown={onActivity}
+      onScroll={onActivity}
+    >
       <div className="mx-auto max-w-2xl space-y-5">
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-3">
             <LogoMark className="size-10" />
             <div>
-              <h1 className="text-xl font-semibold tracking-tight">{changed ? 'Our waiver or rules changed' : 'One more step'}</h1>
+              <h1 className="text-xl font-semibold tracking-tight">
+                {heading ?? (changed ? 'Our waiver or rules changed' : 'One more step')}
+              </h1>
               <p className="text-sm text-muted-foreground">
                 {changed ? 'Please read and sign the updated version to keep playing.' : 'Every player signs the waiver and agrees to the club rules before playing.'}
               </p>
             </div>
           </div>
-          <Button variant="ghost" size="sm" onClick={onSignOut}>
-            <LogOut /> <span className="hidden sm:inline">Sign out</span>
+          <Button variant="ghost" size="sm" onClick={exit.onClick}>
+            {exit.icon} <span className="hidden sm:inline">{exit.label}</span>
           </Button>
         </div>
 

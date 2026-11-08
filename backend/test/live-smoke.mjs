@@ -8,6 +8,8 @@ import { DynamoDBDocumentClient, PutCommand, DeleteCommand, QueryCommand } from 
 
 const BASE = process.argv[2] ?? 'https://www.oakhurst-ball.org';
 const TABLE = 'oakhurst';
+// Fixture players have signed the current waiver + rules (see src/lib/agreements.ts).
+const SIGNED = { waiverVersion: '2026-11-07', rulesVersion: '2026-11-07', agreedAt: '2026-11-07T00:00:00.000Z', signedName: 'ZZ Test' };
 const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({ region: process.env.AWS_REGION ?? 'us-west-2' }));
 const hash = (s) => {
   const salt = randomBytes(16);
@@ -44,7 +46,7 @@ try {
   await ddb.send(new PutCommand({ TableName: TABLE, Item: {
     PK: `PLAYER#${playerId}`, SK: 'PROFILE', playerId, name: 'ZZ Agent Test', pinHash: hash(PIN),
     balanceCents: 0, active: true, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
-    GSI1PK: 'PLAYER', GSI1SK: 'zz agent test',
+    GSI1PK: 'PLAYER', ...SIGNED, GSI1SK: 'zz agent test',
   } }));
 
   let r = await call('/api/kiosk/players');

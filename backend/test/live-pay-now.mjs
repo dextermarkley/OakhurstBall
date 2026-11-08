@@ -13,6 +13,8 @@ import {
 const REGION = process.env.AWS_REGION ?? 'us-west-2';
 const BASE = 'https://www.oakhurst-ball.org';
 const TABLE = 'oakhurst';
+// Fixture players have signed the current waiver + rules (see src/lib/agreements.ts).
+const SIGNED = { waiverVersion: '2026-11-07', rulesVersion: '2026-11-07', agreedAt: '2026-11-07T00:00:00.000Z', signedName: 'ZZ Test' };
 const POOL = 'us-west-2_sgaAJES20';
 const CLIENT = '2fm9q7bir02ib5upgeeelivdii';
 const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({ region: REGION }));
@@ -58,7 +60,7 @@ try {
   await ddb.send(new PutCommand({ TableName: TABLE, Item: {
     PK: `PLAYER#${playerId}`, SK: 'PROFILE', playerId, name: 'ZZ PayNow', balanceCents: -500, active: true,
     createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
-    GSI1PK: 'PLAYER', GSI1SK: 'zz paynow', cognitoSub: sub,
+    GSI1PK: 'PLAYER', ...SIGNED, GSI1SK: 'zz paynow', cognitoSub: sub,
   } }));
 
   let r = await api('GET', '/me/admins');
