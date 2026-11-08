@@ -89,7 +89,7 @@ export function AuthGate({ children }: { children: (signOut: () => void) => Reac
         <LogoMark className="size-12" />
         <div>
           <div className="text-lg font-semibold tracking-tight">Oakhurst Basketball</div>
-          <div className="text-sm text-muted-foreground">oakhurst-ball.org</div>
+          <div className="text-sm text-muted-foreground">{window.location.host}</div>
         </div>
       </div>
       <Card className="w-full max-w-sm">

@@ -3,7 +3,7 @@ import ReactDOM from 'react-dom/client';
 import { Amplify } from 'aws-amplify';
 import { createBrowserRouter, Navigate, RouterProvider } from 'react-router-dom';
 import '@/index.css';
-import { config } from '@/config';
+import { config, isProd, stage } from '@/config';
 import { ConfirmProvider } from '@/components/confirm';
 import { Toaster } from '@/components/ui/sonner';
 import { Spinner } from '@/components/ui/spinner';
@@ -94,9 +94,22 @@ const router = createBrowserRouter(
   ].map((r) => ({ ...r, errorElement: <RouteError /> })),
 );
 
+// Test stages say so on every page, so nobody mistakes alpha for the real club.
+if (!isProd) document.title = `[${stage.toUpperCase()}] ${document.title}`;
+const StageBadge = () =>
+  isProd ? null : (
+    <div
+      aria-label={`${stage} test site`}
+      className="pointer-events-none fixed bottom-2 left-2 z-[60] rounded-md bg-amber-400 px-2 py-0.5 text-xs font-bold tracking-wide text-black uppercase shadow"
+    >
+      {stage} · test data
+    </div>
+  );
+
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <ConfirmProvider>
+      <StageBadge />
       <RouterProvider router={router} />
       <Toaster position="top-center" richColors />
     </ConfirmProvider>

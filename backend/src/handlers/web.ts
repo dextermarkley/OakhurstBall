@@ -69,6 +69,7 @@ function configJs(): string {
     userPoolId: process.env.USER_POOL_ID,
     userPoolClientId: process.env.USER_POOL_CLIENT_ID,
     venmoHandle: process.env.VENMO_HANDLE ?? 'oakhurst-basketball',
+    stage: process.env.STAGE ?? 'prod', // 'alpha' shows a badge on every page
   };
   return `window.OAKHURST_CONFIG = ${JSON.stringify(cfg)};\n`;
 }

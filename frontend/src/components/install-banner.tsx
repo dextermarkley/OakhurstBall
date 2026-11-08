@@ -167,7 +167,7 @@ function stepsFor(kind: InstallKind): ReactNode[] {
       return [
         <>Tap the <b>Share</b> button <Ico><Share /></Ico> in the address bar.</>,
         <>Tap <b>Add to Home Screen</b> <Ico><SquarePlus /></Ico>, then <b>Add</b>.</>,
-        <>Don’t see it? Open <b>oakhurst-ball.org</b> in <b>Safari</b> and add it from there.</>,
+        <>Don’t see it? Open <b>{window.location.host}</b> in <b>Safari</b> and add it from there.</>,
       ];
     case 'android-chrome':
       return [

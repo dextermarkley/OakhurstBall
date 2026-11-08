@@ -5,6 +5,8 @@ export interface AppConfig {
   userPoolId: string;
   userPoolClientId: string;
   venmoHandle: string;
+  /** 'prod', or a test stage like 'alpha' (shown as a badge). */
+  stage?: string;
 }
 
 declare global {
@@ -20,6 +22,9 @@ export const config: AppConfig = window.OAKHURST_CONFIG ?? {
   userPoolClientId: 'REPLACE_ME',
   venmoHandle: 'oakhurst-basketball',
 };
+
+export const stage = config.stage ?? 'prod';
+export const isProd = stage === 'prod';
 
 export const money = (cents: number): string =>
   `$${(Math.abs(cents) / 100).toFixed(2)}`;

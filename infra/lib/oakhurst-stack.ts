@@ -41,8 +41,18 @@ export interface OakhurstStackProps extends cdk.StackProps {
    * for apex + www. Omit to run on the default execute-api URL only.
    */
   readonly domainName?: string;
-  /** Who gets the monthly AWS cost alerts. */
+  /** Who gets the monthly AWS cost alerts (prod only: a budget covers the account). */
   readonly alertEmail?: string;
+  /**
+   * 'prod' (default) is the real club at <domainName> + www. Any other stage, e.g.
+   * 'alpha', is a separate copy of everything (own table, users, bucket, keys) at
+   * <stage>.<domainName>, using the prod stack's hosted zone.
+   */
+  readonly stage?: string;
+  /** Required for a non-prod stage with a domain: the prod stack's hosted zone id. */
+  readonly hostedZoneId?: string;
+  /** Git commit being deployed; shown as the GitSha output. */
+  readonly gitSha?: string;
 }
 
 /**
@@ -55,25 +65,34 @@ export class OakhurstStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: OakhurstStackProps) {
     super(scope, id, props);
 
-    const apex = props?.domainName;
+    const stage = props?.stage ?? 'prod';
+    const prod = stage === 'prod';
+    // Prefix for every named resource. Prod keeps the original names ('oakhurst'),
+    // because renaming would replace the table and the user pool.
+    const P = prod ? 'oakhurst' : `oakhurst-${stage}`;
+    const zoneName = props?.domainName;
+    const apex = zoneName ? (prod ? zoneName : `${stage}.${zoneName}`) : undefined; // the site's host
+    const keep = prod ? cdk.RemovalPolicy.RETAIN : cdk.RemovalPolicy.DESTROY;
 
     // ───────────────────────────── DynamoDB ──────────────────────────────────
     // Single table, PAY_PER_REQUEST (on-demand) → zero idle cost.
     const table = new dynamodb.Table(this, 'Table', {
-      tableName: 'oakhurst',
+      tableName: P,
       partitionKey: { name: 'PK', type: dynamodb.AttributeType.STRING },
       sortKey: { name: 'SK', type: dynamodb.AttributeType.STRING },
       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
       pointInTimeRecoverySpecification: { pointInTimeRecoveryEnabled: true },
       timeToLiveAttribute: 'expiresAt', // auto-expire confirm tokens
-      removalPolicy: cdk.RemovalPolicy.RETAIN, // never auto-drop the ledger
-      deletionProtection: true, // the table can't be deleted until this is turned off
+      removalPolicy: keep, // prod: never auto-drop the ledger
+      deletionProtection: prod, // prod: the table can't be deleted until this is turned off
     });
 
     // Daily backups kept 35 days, in a vault that outlives the stack. On top of
     // point-in-time recovery: a separate copy if the table itself is lost.
-    const backupPlan = backup.BackupPlan.daily35DayRetention(this, 'Backup');
-    backupPlan.addSelection('Table', { resources: [backup.BackupResource.fromDynamoDbTable(table)] });
+    if (prod) {
+      const backupPlan = backup.BackupPlan.daily35DayRetention(this, 'Backup');
+      backupPlan.addSelection('Table', { resources: [backup.BackupResource.fromDynamoDbTable(table)] });
+    }
     table.addGlobalSecondaryIndex({
       indexName: 'GSI1',
       partitionKey: { name: 'GSI1PK', type: dynamodb.AttributeType.STRING },
@@ -85,7 +104,7 @@ export class OakhurstStack extends cdk.Stack {
     // Admin + Player are real Cognito users, separated by group. Free < 10k MAU.
     const siteName = apex ? `https://${apex}` : 'the Oakhurst Basketball site';
     const userPool = new cognito.UserPool(this, 'UserPool', {
-      userPoolName: 'oakhurst-users',
+      userPoolName: `${P}-users`,
       selfSignUpEnabled: true, // players can register themselves
       signInAliases: { email: true },
       autoVerify: { email: true },
@@ -127,8 +146,8 @@ export class OakhurstStack extends cdk.Stack {
       // A changed email only takes effect once the new address is verified, so
       // nobody can put someone else's address on their account.
       keepOriginal: { email: true },
-      deletionProtection: true,
-      removalPolicy: cdk.RemovalPolicy.RETAIN,
+      deletionProtection: prod,
+      removalPolicy: keep,
     });
 
     new cognito.CfnUserPoolGroup(this, 'AdminGroup', {
@@ -143,7 +162,7 @@ export class OakhurstStack extends cdk.Stack {
     });
 
     const userPoolClient = userPool.addClient('WebClient', {
-      userPoolClientName: 'oakhurst-web',
+      userPoolClientName: `${P}-web`,
       authFlows: { userSrp: true, userPassword: true },
       accessTokenValidity: cdk.Duration.hours(1),
       idTokenValidity: cdk.Duration.hours(1),
@@ -155,16 +174,22 @@ export class OakhurstStack extends cdk.Stack {
     // RETAIN the zone so its nameservers never change once the registrar points at
     // them, even if a deploy rolls back. The cert validates itself through this
     // zone as soon as the registrar delegates to it.
-    const hostedZone = apex
-      ? new route53.PublicHostedZone(this, 'Zone', { zoneName: apex })
-      : undefined;
-    hostedZone?.applyRemovalPolicy(cdk.RemovalPolicy.RETAIN);
+    // Other stages reuse the prod zone (records for <stage>.<domain> only).
+    let hostedZone: route53.IHostedZone | undefined;
+    if (zoneName && prod) {
+      const z = new route53.PublicHostedZone(this, 'Zone', { zoneName });
+      z.applyRemovalPolicy(cdk.RemovalPolicy.RETAIN);
+      hostedZone = z;
+    } else if (zoneName) {
+      if (!props?.hostedZoneId) throw new Error(`stage ${stage} needs hostedZoneId (the prod zone)`);
+      hostedZone = route53.HostedZone.fromHostedZoneAttributes(this, 'Zone', { hostedZoneId: props.hostedZoneId, zoneName });
+    }
 
     const certificate =
       apex && hostedZone
         ? new acm.Certificate(this, 'SiteCert', {
             domainName: apex,
-            subjectAlternativeNames: [`www.${apex}`],
+            subjectAlternativeNames: prod ? [`www.${apex}`] : undefined,
             validation: acm.CertificateValidation.fromDns(hostedZone),
           })
         : undefined;
@@ -188,7 +213,7 @@ export class OakhurstStack extends cdk.Stack {
       extraBundling: Partial<BundlingOptions> = {},
     ): NodejsFunction =>
       new NodejsFunction(this, name, {
-        functionName: `oakhurst-${name}`,
+        functionName: `${P}-${name}`,
         runtime: lambda.Runtime.NODEJS_22_X,
         architecture: lambda.Architecture.ARM_64, // cheaper per ms
         projectRoot: backendRoot,
@@ -200,7 +225,7 @@ export class OakhurstStack extends cdk.Stack {
         environment: env,
         bundling: { minify: true, sourceMap: true, target: 'node22', ...extraBundling },
         logGroup: new logs.LogGroup(this, `${name}Logs`, {
-          logGroupName: `/aws/lambda/oakhurst-${name}`,
+          logGroupName: `/aws/lambda/${P}-${name}`,
           retention: logs.RetentionDays.ONE_MONTH,
           removalPolicy: cdk.RemovalPolicy.DESTROY,
         }),
@@ -254,10 +279,10 @@ export class OakhurstStack extends cdk.Stack {
     // Hard ceilings on concurrent Lambdas, so a flood of requests is capped in
     // cost instead of scaling without limit (the account allows 1000).
     for (const [fn, n] of [
-      [apiFn, 40],
-      [webFn, 20],
-      [confirmFn, 10],
-      [postAuthFn, 10],
+      [apiFn, prod ? 40 : 10],
+      [webFn, prod ? 20 : 5],
+      [confirmFn, prod ? 10 : 3],
+      [postAuthFn, prod ? 10 : 3],
     ] as const) {
       (fn.node.defaultChild as lambda.CfnFunction).reservedConcurrentExecutions = n;
     }
@@ -273,8 +298,8 @@ export class OakhurstStack extends cdk.Stack {
       DAILY_FEE_CENTS: '500', // charged once per session
       CARD_AMOUNT_CENTS: '2000',
       CASH_AMOUNT_CENTS: '500',
-      STRIPE_SECRET_PARAM: '/oakhurst/stripe/secret-key',
-      STRIPE_WEBHOOK_PARAM: '/oakhurst/stripe/webhook-secret',
+      STRIPE_SECRET_PARAM: `/${P}/stripe/secret-key`,
+      STRIPE_WEBHOOK_PARAM: `/${P}/stripe/webhook-secret`,
     })) {
       apiFn.addEnvironment(k, v);
       confirmFn.addEnvironment(k, v);
@@ -285,19 +310,20 @@ export class OakhurstStack extends cdk.Stack {
     apiFn.addToRolePolicy(
       new iam.PolicyStatement({
         actions: ['ssm:GetParameter'],
-        resources: [`arn:aws:ssm:${this.region}:${this.account}:parameter/oakhurst/stripe/*`],
+        resources: [`arn:aws:ssm:${this.region}:${this.account}:parameter/${P}/stripe/*`],
       }),
     );
 
     // ───────────────────────── Chat images (S3) ─────────────────────────────
     // Private bucket, pay per use. Browsers upload with a presigned POST and read
     // through short-lived signed URLs (see backend/src/lib/chat.ts).
-    const siteOrigins = apex ? [`https://${apex}`, `https://www.${apex}`] : ['*'];
+    const siteOrigins = apex ? (prod ? [`https://${apex}`, `https://www.${apex}`] : [`https://${apex}`]) : ['*'];
     const chatBucket = new s3.Bucket(this, 'ChatMedia', {
       blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
       encryption: s3.BucketEncryption.S3_MANAGED,
       enforceSSL: true,
-      removalPolicy: cdk.RemovalPolicy.RETAIN, // people's photos: never lost to a stack change
+      removalPolicy: keep, // prod: people's photos are never lost to a stack change
+      autoDeleteObjects: !prod, // test stages empty the bucket when torn down
       cors: [{ allowedMethods: [s3.HttpMethods.POST], allowedOrigins: siteOrigins, allowedHeaders: ['*'], maxAge: 3600 }],
       lifecycleRules: [{ abortIncompleteMultipartUploadAfter: cdk.Duration.days(1) }],
     });
@@ -319,16 +345,21 @@ export class OakhurstStack extends cdk.Stack {
       fn.addToRolePolicy(
         new iam.PolicyStatement({
           actions: ['ssm:GetParameter'],
-          resources: [`arn:aws:ssm:${this.region}:${this.account}:parameter/oakhurst/push/*`],
+          resources: [`arn:aws:ssm:${this.region}:${this.account}:parameter/${P}/push/*`],
         }),
       );
+      if (!prod) {
+        fn.addEnvironment('VAPID_PUBLIC_PARAM', `/${P}/push/vapid-public`);
+        fn.addEnvironment('VAPID_PRIVATE_PARAM', `/${P}/push/vapid-private`);
+      }
     }
+    if (!prod) webFn.addEnvironment('STAGE', stage); // shows a stage badge in the app
 
     // ───────────────────────── Email domain (SES) ──────────────────────────
     // The app sends no email of its own any more (admins get app notifications),
     // but the domain stays verified in SES (DKIM CNAMEs, MAIL FROM bounce.<apex>,
     // monitoring-only DMARC) so mail from it keeps authenticating if it's needed.
-    if (apex && hostedZone) {
+    if (prod && apex && hostedZone) {
       new ses.EmailIdentity(this, 'EmailIdentity', {
         identity: ses.Identity.publicHostedZone(hostedZone),
         mailFromDomain: `bounce.${apex}`,
@@ -345,7 +376,7 @@ export class OakhurstStack extends cdk.Stack {
     // ───────────────────────────── HTTP API ──────────────────────────────────
     // Site and API share one origin, so browsers make no cross-origin calls.
     const httpApi = new apigwv2.HttpApi(this, 'HttpApi', {
-      apiName: 'oakhurst-api',
+      apiName: `${P}-api`,
       defaultIntegration: new apigwv2_integ.HttpLambdaIntegration('WebInteg', webFn),
     });
 
@@ -357,11 +388,11 @@ export class OakhurstStack extends cdk.Stack {
     // ── Throttling ── per-stage limits (requests/second, shared by all callers).
     // HTTP APIs can't use AWS WAF, so these plus per-user caps in the code
     // (PIN lockout, pending-payment caps, chat quotas) are the flood protection.
-    const stage = httpApi.defaultStage!.node.defaultChild as apigwv2.CfnStage;
-    stage.defaultRouteSettings = { throttlingBurstLimit: 60, throttlingRateLimit: 30 };
+    const apiStage = httpApi.defaultStage!.node.defaultChild as apigwv2.CfnStage;
+    apiStage.defaultRouteSettings = { throttlingBurstLimit: 60, throttlingRateLimit: 30 };
     // routeSettings is raw JSON, so the keys use the CloudFormation casing.
     const limit = (rate: number, burst: number) => ({ ThrottlingRateLimit: rate, ThrottlingBurstLimit: burst });
-    stage.routeSettings = {
+    apiStage.routeSettings = {
       'GET /api/kiosk/{proxy+}': limit(10, 20),
       'POST /api/kiosk/{proxy+}': limit(3, 10),
       'GET /api/confirm/{proxy+}': limit(2, 5),
@@ -372,11 +403,11 @@ export class OakhurstStack extends cdk.Stack {
     };
     // Access log (who called what, status, latency) for investigating abuse.
     const accessLogs = new logs.LogGroup(this, 'ApiAccessLogs', {
-      logGroupName: '/aws/apigateway/oakhurst-api',
+      logGroupName: `/aws/apigateway/${P}-api`,
       retention: logs.RetentionDays.THREE_MONTHS,
       removalPolicy: cdk.RemovalPolicy.DESTROY,
     });
-    stage.accessLogSettings = {
+    apiStage.accessLogSettings = {
       destinationArn: accessLogs.logGroupArn,
       format: JSON.stringify({
         t: '$context.requestTime',
@@ -434,10 +465,13 @@ export class OakhurstStack extends cdk.Stack {
 
     // ───────────────────── API Gateway custom domain ──────────────────────────
     if (apex && hostedZone && certificate) {
-      for (const [id, name, recordName] of [
-        ['Apex', apex, undefined],
-        ['Www', `www.${apex}`, 'www'],
-      ] as const) {
+      const hosts: Array<[string, string, string | undefined]> = prod
+        ? [
+            ['Apex', apex, undefined],
+            ['Www', `www.${apex}`, 'www'],
+          ]
+        : [['Site', apex, stage]];
+      for (const [id, name, recordName] of hosts) {
         const dn = new apigwv2.DomainName(this, `${id}Domain`, { domainName: name, certificate });
         new apigwv2.ApiMapping(this, `${id}Mapping`, { api: httpApi, domainName: dn });
         const target = route53.RecordTarget.fromAlias(
@@ -446,10 +480,12 @@ export class OakhurstStack extends cdk.Stack {
         new route53.ARecord(this, `${id}A`, { zone: hostedZone, recordName, target });
         new route53.AaaaRecord(this, `${id}AAAA`, { zone: hostedZone, recordName, target });
       }
-      new cdk.CfnOutput(this, 'NameServers', {
-        value: cdk.Fn.join(', ', hostedZone.hostedZoneNameServers!),
-        description: 'Set these as the nameservers for the domain at your registrar',
-      });
+      if (prod) {
+        new cdk.CfnOutput(this, 'NameServers', {
+          value: cdk.Fn.join(', ', hostedZone.hostedZoneNameServers!),
+          description: 'Set these as the nameservers for the domain at your registrar',
+        });
+      }
     }
 
     const appBaseUrl = apex ? `https://${apex}` : httpApi.apiEndpoint;
@@ -463,7 +499,7 @@ export class OakhurstStack extends cdk.Stack {
     // ───────────────────────────── Cost alarm ─────────────────────────────────
     // The club normally costs a few dollars a month. Email when this month's
     // spend passes $10 so far, or is forecast to pass $25.
-    if (props?.alertEmail) {
+    if (prod && props?.alertEmail) {
       const to = [{ subscriptionType: 'EMAIL', address: props.alertEmail }];
       new budgets.CfnBudget(this, 'MonthlyBudget', {
         budget: {
@@ -496,5 +532,7 @@ export class OakhurstStack extends cdk.Stack {
     new cdk.CfnOutput(this, 'UserPoolClientId', { value: userPoolClient.userPoolClientId });
     new cdk.CfnOutput(this, 'TableName', { value: table.tableName });
     new cdk.CfnOutput(this, 'Region', { value: this.region });
+    new cdk.CfnOutput(this, 'Stage', { value: stage });
+    if (props?.gitSha) new cdk.CfnOutput(this, 'GitSha', { value: props.gitSha, description: 'Commit deployed here' });
   }
 }
