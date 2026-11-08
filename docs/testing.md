@@ -36,6 +36,7 @@ pagination cursors, contact validation.
 | approval | chat approval gate, sign-up trigger notifies admins only |
 | agreements | waiver + rules signing, minors, immutability |
 | kiosk-remove | pairing (admins only), removal locks the kiosk out |
+| kiosk-admin | only an admin can generate a kiosk pairing code: players, edited or unsigned tokens, the other stack's admins, kiosk credentials and path tricks are all refused and write nothing |
 | expenses | add/edit/delete, season totals |
 | community | announcements + RSVP, chat text/images/deletes, upload limits |
 | sessions | open/close, check-in once per session, fees, limits, defer |

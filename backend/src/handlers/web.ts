@@ -104,6 +104,15 @@ export const handler = async (event: APIGatewayProxyEventV2): Promise<APIGateway
     return notFound(); // malformed %-escape
   }
 
+  // The site is read-only: anything but GET/HEAD is refused, and an /api path the
+  // API routes didn't claim (e.g. "/API/admin/…", routes are case-sensitive) is a
+  // plain 404 rather than the app's HTML, so it can't look like it worked.
+  const m = event.requestContext?.http?.method ?? 'GET';
+  if (m !== 'GET' && m !== 'HEAD') {
+    return { statusCode: 405, headers: { allow: 'GET, HEAD', 'content-type': 'text/plain; charset=utf-8', ...SECURITY_HEADERS }, body: 'Method not allowed' };
+  }
+  if (/^\/api(\/|$)/i.test(raw)) return notFound();
+
   if (raw === '/config.js') {
     return {
       statusCode: 200,
