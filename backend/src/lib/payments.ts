@@ -1,5 +1,5 @@
 // Payment engine. Every payment starts PENDING and is settled exactly once:
-//   cash → the chosen admin taps the emailed magic link (confirm/deny), or uses
+//   cash → the chosen admin taps the notification's confirm link (confirm/deny), or uses
 //          the Confirm/Deny buttons on the Admin page
 //   card → Stripe reports the Checkout session paid (kiosk poll, return page,
 //          or webhook — whichever arrives first; the rest are no-ops)
@@ -9,11 +9,10 @@ import { TransactWriteCommand, GetCommand, QueryCommand, UpdateCommand, DeleteCo
 import { ddb, TABLE, GSI1, keys, gsi, sha256 } from './ddb.js';
 import { makeToken, newId } from './crypto.js';
 import { createCheckoutSession, retrieveCheckoutSession } from './stripe.js';
-import { sendEmail, escapeHtml } from './email.js';
 import { PLAN_PRICES, periodFor, type Plan } from './plans.js';
 import { passItem, passKey } from './passes.js';
 import { isSamePerson } from './views.js';
-import { clubDate, getAdmin, getPlayer, listAdminsDetailed, pendingPaymentsOf } from './repo.js';
+import { clubDate, getAdmin, getPlayer, pendingPaymentsOf } from './repo.js';
 import { sendPush, toAdmin, toPlayer } from './push.js';
 import { refundCurrentSessionFee } from './sessions.js';
 import type { Payment, PaymentMethod } from './types.js';
@@ -279,9 +278,10 @@ export async function getPayment(paymentId: string) {
 
 // ─────────────────────────────── Cash ──────────────────────────────────────
 /**
- * Record a pending cash payment and email the chosen admin a one-tap confirm link.
- * The payment is written first, so if the email fails it still shows on the Admin
- * page and can be confirmed there; `emailed` tells the kiosk which happened.
+ * Record a pending cash payment and send the chosen admin a notification that
+ * opens a one-tap confirm page. The payment is written first, so it always shows
+ * on the Admin page too; `notified` says whether any of the admin's devices got
+ * the notification (if not, they confirm it on the Admin page).
  */
 export async function createCashPayment(input: {
   playerId: string;
@@ -291,7 +291,7 @@ export async function createCashPayment(input: {
   plan?: Plan;
   /** Credit amount (ignored for passes, which have a fixed price). */
   creditCents?: number;
-}): Promise<{ payment: Payment; emailed: boolean }> {
+}): Promise<{ payment: Payment; notified: boolean }> {
   const [player, adm, pending] = await Promise.all([
     getPlayer(input.playerId),
     getAdmin(input.adminId),
@@ -318,10 +318,9 @@ export async function createCashPayment(input: {
     withToken: true,
   });
 
-  const link = `${baseUrl()}/confirm/${token}`;
   const amount = dollars(amountCents);
-  // Push to the admin's installed app too; it opens the same confirm page.
-  await sendPush(
+  // Notify the admin's devices; tapping opens the one-tap confirm page.
+  const push = await sendPush(
     toAdmin({ cognitoSub: adm?.cognitoSub, email: input.adminEmail ?? adm?.email }),
     {
       title: `Cash from ${input.playerName}: ${amount}`,
@@ -331,33 +330,7 @@ export async function createCashPayment(input: {
     },
     { urgency: 'high', ttlSeconds: 24 * 3600 },
   );
-  if (!input.adminEmail) return { payment, emailed: false };
-
-  const name = escapeHtml(input.playerName);
-  const forWhat = input.plan ? ` for a ${purchase.what}` : '';
-  try {
-    await sendEmail({
-      to: input.adminEmail,
-      subject: `Confirm ${amount} cash from ${input.playerName}${forWhat}`,
-      text:
-        `${input.playerName} says they paid you ${amount} in cash${forWhat}. Please confirm or deny it:\n\n` +
-        `${link}\n\n` +
-        `You received this because the player chose you. If it didn't happen, you can ignore this email; the link expires in 24 hours. You can also confirm it on the Admin page.`,
-      html:
-        `<p><strong>${name}</strong> says they paid you <strong>${amount} in cash</strong>` +
-        `${escapeHtml(forWhat)}. Please confirm or deny it.</p>` +
-        `<p><a href="${link}" style="display:inline-block;padding:12px 20px;background:#e8730c;` +
-        `color:#fff;border-radius:8px;text-decoration:none;font-weight:600">` +
-        `Confirm or deny</a></p>` +
-        `<p style="color:#6b7684;font-size:13px">You received this because the player chose you. ` +
-        `If it didn't happen, you can ignore this email; the link expires in 24 hours. ` +
-        `You can also confirm it on the Admin page.</p>`,
-    });
-    return { payment, emailed: true };
-  } catch (err) {
-    console.error('cash confirm email failed', { paymentId: payment.paymentId, err });
-    return { payment, emailed: false };
-  }
+  return { payment, notified: push.sent > 0 };
 }
 
 /**
@@ -393,7 +366,7 @@ export async function adminSettle(
   );
 }
 
-/** Resolve an emailed confirm token → its pending payment. */
+/** Resolve a confirm-link token → its pending payment. */
 export async function resolveToken(token: string) {
   if (!/^[A-Za-z0-9_-]{20,64}$/.test(token)) return null;
   let tokenKey = keys.tokenHash(sha256(token));
@@ -506,7 +479,7 @@ export async function syncCardPayment(paymentId: string): Promise<Payment['statu
  * clawed back (dispute / chargeback). Take back what it bought, once:
  *   - a pass bought by this payment is removed;
  *   - otherwise the amount comes off the balance (it may go negative).
- * Then tell every admin by email and push. Returns false if nothing to do.
+ * Then notify every admin's devices. Returns false if nothing to do.
  */
 export async function reverseCardPayment(paymentId: string, kind: 'refunded' | 'disputed'): Promise<boolean> {
   const found = await getPayment(paymentId);
@@ -563,20 +536,10 @@ export async function reverseCardPayment(paymentId: string, kind: 'refunded' | '
   const title = `Card payment ${kind === 'refunded' ? 'refunded' : 'disputed'}: ${name}`;
   const body = `${dollars(payment.amountCents)} card payment ${kind === 'refunded' ? 'was refunded' : 'is disputed (chargeback)'} in Stripe, so the app has ${what}.`;
   console.warn('card payment reversed', { paymentId, kind, passRemoved });
-  const admins = (await listAdminsDetailed()).filter((a) => a.active);
-  await sendPush((s) => !!s.isAdmin, { title, body, url: '/admin?tab=players', tag: `reverse-${paymentId}` });
-  await Promise.all(
-    admins
-      .filter((a) => a.email)
-      .map((a) =>
-        sendEmail({
-          to: a.email!,
-          subject: title,
-          text: `${body}\n\nCheck the payment in the Stripe Dashboard. Payment id: ${paymentId}`,
-          html: `<p>${escapeHtml(body)}</p><p style="color:#6b7684;font-size:13px">Check the payment in the Stripe Dashboard. Payment id: ${paymentId}</p>`,
-        }).catch((e) => console.error('reversal email failed', e)),
-      ),
-  );
+  await sendPush((s) => !!s.isAdmin, { title, body, url: '/admin?tab=players', tag: `reverse-${paymentId}` }, {
+    urgency: 'high',
+    ttlSeconds: 7 * 86400,
+  });
   return true;
 }
 

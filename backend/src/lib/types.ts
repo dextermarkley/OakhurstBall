@@ -25,7 +25,7 @@ export interface Player {
 export interface Admin {
   adminId: string;
   name: string;
-  /** Where cash-confirmation links are emailed. */
+  /** Login email; links this admin record to their account on first sign-in. */
   email?: string;
   phone?: string; // E.164; kept for a future SMS channel
   cognitoSub?: string;
@@ -56,7 +56,7 @@ export interface Payment {
   confirmToken?: string;
   /** sha256 of the confirm-link token: finds its TOKENH# row, can't confirm anything. */
   confirmTokenHash?: string;
-  /** Who settled it: 'link' (emailed confirm link), 'admin:<sub>', 'stripe'. */
+  /** Who settled it: 'link' (confirm link from a notification), 'admin:<sub>', 'stripe'. */
   settledBy?: string;
   /** Stripe reported a refund or a dispute on this card payment. */
   reversed?: 'refunded' | 'disputed';

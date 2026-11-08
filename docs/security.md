@@ -18,7 +18,7 @@ still do by hand. Live checks: `AWS_REGION=us-west-2 node backend/test/live-secu
   note).
 - **Stripe refunds and disputes** (`charge.refunded` when fully refunded,
   `charge.dispute.created`) take back what the payment bought (the pass, or the
-  amount off the balance) and email and push every admin. The Stripe webhook
+  amount off the balance) and notify every admin's devices. The Stripe webhook
   endpoint must have those two events enabled (done for the test-mode endpoint;
   repeat for the live endpoint when switching to live keys).
 - Every settled payment records `settledBy`: `link`, `admin:<sub>` or `stripe`.
@@ -30,7 +30,7 @@ still do by hand. Live checks: `AWS_REGION=us-west-2 node backend/test/live-secu
   (`keepOriginal`), and admin pushes go to the admin's own account (admin records
   are linked to the Cognito account on their first visit, `linkAdminSub`).
 - Names are cleaned on the server (no control, zero-width or bidi characters, at
-  most 60 characters); email subjects and push titles are single lines.
+  most 60 characters); push titles are single lines.
 
 ## Kiosk
 

@@ -90,8 +90,8 @@ try {
 
   r = await api('POST', '/me/pay-cash', { adminId: cashAdminId });
   const paymentId = r.body?.paymentId;
-  check('pay-cash $5 → 201 pending, not emailed',
-    r.status === 201 && r.body.amountCents === 500 && r.body.emailed === false && r.body.adminName === 'ZZ Test Cashier', r);
+  check('pay-cash $5 → 201 pending, no admin device to notify',
+    r.status === 201 && r.body.amountCents === 500 && r.body.notified === false && r.body.adminName === 'ZZ Test Cashier', r);
   check('balance unchanged until confirmed', (await balance()) === -500, await balance());
 
   r = await api('GET', '/admin/pending');

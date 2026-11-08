@@ -324,12 +324,11 @@ export class OakhurstStack extends cdk.Stack {
       );
     }
 
-    // ───────────────────────── Email (SES) ─────────────────────────────────
-    // Cash-confirm links go out by email. The domain is verified in SES through
-    // DKIM CNAMEs in the Route 53 zone; a custom MAIL FROM (bounce.<apex>) aligns
-    // SPF, and a monitoring-only DMARC record helps inbox placement.
+    // ───────────────────────── Email domain (SES) ──────────────────────────
+    // The app sends no email of its own any more (admins get app notifications),
+    // but the domain stays verified in SES (DKIM CNAMEs, MAIL FROM bounce.<apex>,
+    // monitoring-only DMARC) so mail from it keeps authenticating if it's needed.
     if (apex && hostedZone) {
-      const fromAddress = `no-reply@${apex}`;
       new ses.EmailIdentity(this, 'EmailIdentity', {
         identity: ses.Identity.publicHostedZone(hostedZone),
         mailFromDomain: `bounce.${apex}`,
@@ -339,15 +338,6 @@ export class OakhurstStack extends cdk.Stack {
         recordName: '_dmarc',
         values: ['v=DMARC1; p=none;'],
       });
-      apiFn.addEnvironment('EMAIL_FROM', `Oakhurst Basketball <${fromAddress}>`);
-      // Only this account's identities, and only From the no-reply address.
-      apiFn.addToRolePolicy(
-        new iam.PolicyStatement({
-          actions: ['ses:SendEmail'],
-          resources: [`arn:aws:ses:${this.region}:${this.account}:identity/*`],
-          conditions: { StringEquals: { 'ses:FromAddress': fromAddress } },
-        }),
-      );
     }
 
     userPool.addTrigger(cognito.UserPoolOperation.POST_CONFIRMATION, postAuthFn);
@@ -463,7 +453,7 @@ export class OakhurstStack extends cdk.Stack {
     }
 
     const appBaseUrl = apex ? `https://${apex}` : httpApi.apiEndpoint;
-    apiFn.addEnvironment('APP_BASE_URL', appBaseUrl); // used in the emailed confirm link
+    apiFn.addEnvironment('APP_BASE_URL', appBaseUrl); // Stripe return URLs
     confirmFn.addEnvironment('APP_BASE_URL', appBaseUrl);
     // Only with a custom domain: the fallback is the API endpoint, which would make
     // the Cognito trigger depend on the API (a CloudFormation cycle). push.ts falls

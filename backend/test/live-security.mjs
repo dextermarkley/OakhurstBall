@@ -169,7 +169,7 @@ try {
   const confBody = await conf.json();
   const after = (await ddb.send(new GetCommand({ TableName: TABLE, Key: { PK: `PLAYER#${playerA}`, SK: 'PROFILE' } }))).Item.balanceCents;
   const gone = !(await ddb.send(new GetCommand({ TableName: TABLE, Key: kLink }))).Item;
-  check('emailed-link confirm credits once and uses up the link', confBody.result === 'confirmed' && after - before === p1.amountCents && gone, { confBody, before, after, gone });
+  check('confirm-link confirm credits once and uses up the link', confBody.result === 'confirmed' && after - before === p1.amountCents && gone, { confBody, before, after, gone });
   const settled = (await ddb.send(new GetCommand({ TableName: TABLE, Key: { PK: `PLAYER#${playerA}`, SK: p1.SK } }))).Item;
   check('settled payment records who settled it', settled?.settledBy === 'link', settled?.settledBy);
 

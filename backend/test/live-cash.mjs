@@ -1,6 +1,6 @@
 // Live cash-flow test: throwaway kiosk + player, check in ($5 fee), pay $5 cash to a
-// real admin, which sends a REAL confirm email. Leaves the player in place so the
-// admin can click the emailed link; run with --cleanup <playerId> <deviceId> after.
+// real admin, which sends a REAL notification to that admin's devices. Leaves the
+// player in place so the admin can tap it; run with --cleanup <playerId> <deviceId> after.
 //   AWS_REGION=us-west-2 node test/live-cash.mjs <adminId>
 //   AWS_REGION=us-west-2 node test/live-cash.mjs --cleanup <playerId> <deviceId>
 import { randomBytes, scryptSync } from 'node:crypto';

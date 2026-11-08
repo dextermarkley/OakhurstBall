@@ -85,7 +85,7 @@ export function Kiosk() {
   const [pin, setPin] = useState('');
   const [checkin, setCheckin] = useState<CheckinResult | null>(null);
   const [card, setCard] = useState<{ paymentId: string; url: string; qr: string } | null>(null);
-  const [cash, setCash] = useState<{ paymentId: string; adminName: string; emailed: boolean } | null>(null);
+  const [cash, setCash] = useState<{ paymentId: string; adminName: string; notified: boolean } | null>(null);
   const [buying, setBuying] = useState<Purchase | null>(null);
   const [inGym, setInGym] = useState(false); // checked in during this flow
   const [agreeDocs, setAgreeDocs] = useState<{ waiver: AgreementDoc; rules: AgreementDoc; changed: boolean } | null>(null);
@@ -371,7 +371,7 @@ export function Kiosk() {
     try {
       await checkInIfAllowed();
       const r = await kiosk.payCash(selected.playerId, pin, admin.adminId, buying?.plan, buying?.amountCents);
-      setCash({ paymentId: r.paymentId, adminName: r.adminName, emailed: r.emailed });
+      setCash({ paymentId: r.paymentId, adminName: r.adminName, notified: r.notified });
       setStep('cashwait');
     } catch (e: any) {
       fail(e);
@@ -774,13 +774,13 @@ export function Kiosk() {
 
           {step === 'cashwait' && cash && buying && (
             <Centered>
-              <IconBubble tone="brand">{cash.emailed ? <Bell className="size-7" /> : <Banknote className="size-7" />}</IconBubble>
+              <IconBubble tone="brand">{cash.notified ? <Bell className="size-7" /> : <Banknote className="size-7" />}</IconBubble>
               <h1 className="text-2xl font-semibold tracking-tight">
                 Hand {money(buying.amountCents)} to {cash.adminName}
               </h1>
               <p className="mt-2 text-muted-foreground">{buying.what}</p>
               <p className="mt-6">
-                {cash.emailed ? `${cash.adminName} got a notification to confirm it.` : `${cash.adminName} can confirm it on the Admin page.`}
+                {cash.notified ? `${cash.adminName} got a notification to confirm it.` : `${cash.adminName} can confirm it on the Admin page.`}
               </p>
               <p className="mt-2 inline-flex items-center gap-2 text-sm text-muted-foreground">
                 <Spinner />

@@ -1,4 +1,4 @@
-// The one-tap confirm/deny page an admin lands on from the emailed magic link.
+// The one-tap confirm/deny page an admin lands on from a cash notification.
 import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { Banknote, CheckCircle2, CircleSlash, Clock, XCircle } from 'lucide-react';

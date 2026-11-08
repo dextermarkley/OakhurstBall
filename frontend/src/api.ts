@@ -345,7 +345,7 @@ export const api = {
   },
   /** amountCents: cash credit in $5 steps (ignored for passes). */
   async myPayCash(adminId: string, plan?: Plan, amountCents?: number) {
-    return req<{ paymentId: string; amountCents: number; adminName: string; emailed: boolean }>('/api/me/pay-cash', {
+    return req<{ paymentId: string; amountCents: number; adminName: string; notified: boolean }>('/api/me/pay-cash', {
       method: 'POST',
       headers: await authHeaders(),
       body: JSON.stringify({ adminId, plan, amountCents: plan ? undefined : amountCents }),
@@ -566,7 +566,7 @@ export const kiosk = {
     );
   },
   async payCash(playerId: string, pin: string, adminId: string, plan?: Plan, amountCents?: number) {
-    return req<{ paymentId: string; amountCents: number; adminName: string; emailed: boolean }>(
+    return req<{ paymentId: string; amountCents: number; adminName: string; notified: boolean }>(
       '/api/kiosk/pay',
       { method: 'POST', body: JSON.stringify({ playerId, pin, method: 'cash', adminId, plan, amountCents: plan ? undefined : amountCents }) },
       kioskHeaders(),

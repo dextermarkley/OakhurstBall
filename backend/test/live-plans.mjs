@@ -140,7 +140,7 @@ try {
 
   // ── C: buys a quarter pass with cash at the kiosk; admin confirms ──
   r = await kiosk('/pay', { playerId: P.c.id, pin: PIN, method: 'cash', adminId: cashAdminId, plan: 'quarter' });
-  check('kiosk cash quarter pass: $80 pending', r.status === 201 && r.body.amountCents === 8000 && r.body.emailed === false, r.body);
+  check('kiosk cash quarter pass: $80 pending', r.status === 201 && r.body.amountCents === 8000 && r.body.notified === false, r.body);
   const cPay = r.body.paymentId;
   r = await api('GET', '/admin/pending');
   const pend = r.body.pending?.find((x) => x.paymentId === cPay);

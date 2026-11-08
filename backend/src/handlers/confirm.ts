@@ -2,7 +2,7 @@
 //
 //   GET  /api/confirm/{token}          → payment details (for the confirm page to show)
 //   POST /api/confirm/{token}  {action: 'confirm' | 'deny'}
-// The emailed link itself points at /confirm/{token}, which is the SPA page (web Lambda).
+// The notification's link points at /confirm/{token}, which is the SPA page (web Lambda).
 import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2 } from 'aws-lambda';
 import { ok, badRequest, notFound, serverError, parseBody, routePath, method } from '../lib/http.js';
 import { resolveToken, confirmPayment, denyPayment } from '../lib/payments.js';

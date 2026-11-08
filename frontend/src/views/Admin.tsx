@@ -975,7 +975,7 @@ function PaymentsTab() {
     <div className="space-y-6">
       <PageHeader
         title="Payments"
-        description="Cash waits for an admin to confirm, from the emailed link or here. Card payments confirm automatically."
+        description="Cash waits for an admin to confirm, from the notification or here. Card payments confirm automatically."
         actions={
           <Button variant="outline" onClick={load}>
             Refresh
@@ -1100,7 +1100,7 @@ function AdminsTab() {
     <div className="space-y-6">
       <PageHeader
         title="Admins"
-        description="People players can hand cash to at the kiosk. They get an email to confirm each payment. This list doesn’t give anyone access to the dashboard."
+        description="People players can hand cash to. Each gets an app notification to confirm the payment, sent to the account that signs in with this email, so they should turn notifications on. This list doesn’t give anyone access to the dashboard."
         actions={
           <Button onClick={() => setAdding(true)}>
             <Plus /> Add admin
@@ -1118,7 +1118,7 @@ function AdminsTab() {
               <TableHeader>
                 <TableRow>
                   <TableHead>Name</TableHead>
-                  <TableHead>Confirmation emails</TableHead>
+                  <TableHead>Sign-in email</TableHead>
                   <TableHead className="w-24" />
                 </TableRow>
               </TableHeader>
@@ -1188,7 +1188,7 @@ function AdminsTab() {
           <form onSubmit={save} noValidate>
             <DialogHeader>
               <DialogTitle>Edit {editing?.name}’s email</DialogTitle>
-              <DialogDescription>Cash confirmation links go to this address.</DialogDescription>
+              <DialogDescription>The email they sign in with. Cash notifications go to that account.</DialogDescription>
             </DialogHeader>
             <FieldGroup className="py-5">
               <FormInput control={editForm.control} name="email" label="Email" type="email" autoComplete="off" />

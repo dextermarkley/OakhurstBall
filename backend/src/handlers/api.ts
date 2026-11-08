@@ -427,7 +427,7 @@ async function kioskRouter(
     if (typeof credit === 'string') return badRequest(credit);
     const admin = await getAdmin(adminId);
     if (!admin || !admin.active) return notFound('Admin not found');
-    const { payment, emailed } = await createCashPayment({
+    const { payment, notified } = await createCashPayment({
       playerId,
       playerName: player.name,
       adminId,
@@ -439,7 +439,7 @@ async function kioskRouter(
       paymentId: payment.paymentId,
       amountCents: payment.amountCents,
       adminName: admin.name,
-      emailed,
+      notified,
     });
   }
 
@@ -730,7 +730,7 @@ async function apiRouter(
       const blocked = await planBlocked(player.playerId, plan);
       if (blocked) return json(409, { error: blocked });
     }
-    const { payment, emailed } = await createCashPayment({
+    const { payment, notified } = await createCashPayment({
       playerId: player.playerId,
       playerName: player.name,
       adminId: adm.adminId,
@@ -738,7 +738,7 @@ async function apiRouter(
       plan,
       creditCents: credit,
     });
-    return created({ paymentId: payment.paymentId, amountCents: payment.amountCents, adminName: adm.name, emailed });
+    return created({ paymentId: payment.paymentId, amountCents: payment.amountCents, adminName: adm.name, notified });
   }
 
   // ── Notifications (Web Push) ──

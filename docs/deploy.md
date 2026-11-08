@@ -70,18 +70,14 @@ The code is shown once. Generating again for the same device ID rotates the toke
 old kiosk then drops back to the setup screen on its next refresh (within 15 s).
 (`scripts/provision-kiosk.mjs` does the same from the CLI.)
 
-## Cash confirmation email (SES)
+## Cash confirmation
 
-Cash confirm links are emailed from `no-reply@oakhurst-ball.org` via Amazon SES. The
-stack verifies the domain (DKIM CNAMEs, `bounce.` MAIL FROM, `_dmarc` TXT in Route 53).
-Each admin needs an email (Admin → Admins → Edit email). Pending cash can also be
-confirmed or denied on Admin → Pending payments.
-
-SES starts in its sandbox: it only delivers to verified recipient addresses. Verify an
-admin's address with `aws sesv2 create-email-identity --region us-west-2
---email-identity <email>` (they click the link AWS emails them), or request production
-access (SES console → Account dashboard → Request production access) so any admin
-address works.
+The admin a player picks gets an app notification ("Cash from …") that opens the
+one-tap confirm page. Admins need notifications turned on in the installed app; an
+admin with none still sees the payment on Admin → Payments and confirms it there.
+The app sends no email itself (Cognito still emails sign-up and reset codes). The
+domain stays verified in SES (DKIM, `bounce.` MAIL FROM, `_dmarc` TXT) in case
+email is needed again.
 
 SMS is not used: US texts need a registered toll-free/10DLC number (~$2/mo plus a
 multi-day carrier registration).

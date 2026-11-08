@@ -2,7 +2,7 @@
 //   • at check-in (ask = the check-in reply): pay, or "pay next time" if allowed
 //   • any time from "Pay now" (no ask)
 // Card goes to Stripe Checkout; cash asks which admin gets the money, and that
-// admin confirms by email (or on the Admin page), same as the kiosk.
+// admin confirms from a notification (or on the Admin page), same as the kiosk.
 import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { ArrowLeft, Banknote, CircleDollarSign, CreditCard, Ticket } from 'lucide-react';
@@ -42,7 +42,7 @@ export function PayDialog({
     setCashFor(p);
   };
   const cashTotal = cashFor ? (cashFor.plan ? cashFor.cents : cashCents) : 0;
-  const [sent, setSent] = useState<{ adminName: string; cents: number; emailed: boolean; label: string } | null>(null);
+  const [sent, setSent] = useState<{ adminName: string; cents: number; notified: boolean; label: string } | null>(null);
   const [admins, setAdmins] = useState<Admin[] | null>(null);
   const openRef = useRef(open);
   openRef.current = open;
@@ -111,7 +111,7 @@ export function PayDialog({
       const r = await api.myPayCash(admin.adminId, cashFor.plan, cashFor.plan ? undefined : cashCents);
       const label = cashFor.plan ? cashFor.label : `${money(r.amountCents)} account credit`;
       // Closed while waiting? Say it in a toast rather than reopening to a stale screen.
-      if (openRef.current) setSent({ adminName: r.adminName, cents: r.amountCents, emailed: r.emailed, label });
+      if (openRef.current) setSent({ adminName: r.adminName, cents: r.amountCents, notified: r.notified, label });
       else toast.success(`Hand ${money(r.amountCents)} to ${r.adminName}. Your balance updates when they confirm.`);
       onChanged();
     } catch (e: any) {
@@ -162,7 +162,7 @@ export function PayDialog({
               </DialogTitle>
               <DialogDescription>
                 For {sent.label}.{' '}
-                {sent.emailed ? `${sent.adminName} got a notification to confirm it.` : `${sent.adminName} can confirm it on the Admin page.`}{' '}
+                {sent.notified ? `${sent.adminName} got a notification to confirm it.` : `${sent.adminName} can confirm it on the Admin page.`}{' '}
                 {blocked
                   ? 'Once they confirm, tap Check in again.'
                   : canDefer

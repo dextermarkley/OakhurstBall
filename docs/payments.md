@@ -21,7 +21,7 @@ Code: `backend/src/lib/plans.ts`; boundary tests in `test/pure.test.ts`.
 - Buying a pass after paying for today's session refunds that $5.
 - Already covered → the purchase is refused (a quarter on top of a year included).
   If two purchases race and both get paid, the second becomes balance credit.
-- Buy at the kiosk (card QR or cash with admin email confirm), on the player page
+- Buy at the kiosk (card QR or cash, confirmed by the admin), on the player page
   (card), or have an admin record one paid outside the app (Admin → Players → Record pass).
 
 Items: `PLAYER#<pid> / PASS#<periodId>` (periodId `Q2026-3` or `Y2026`), with
@@ -64,8 +64,8 @@ After check-in, a player who owes money (or is blocked) can pay:
   kiosk" is the fallback. The $20 is credit: after today's $5, $15 remains and
   covers the next three check-ins with no payment step.
 - **Cash**: in $5 steps from $5 up to `MAX_CASH_CENTS` ($200). The player picks the
-  admin they hand it to; that admin gets an email (and a push notification, if
-  enabled) with a one-tap confirm link.
+  admin they hand it to; that admin gets an app notification that opens a one-tap
+  confirm page (or confirms it on the Admin page).
 - **Passes** (quarter or year) can be bought at the kiosk by card or cash at a fixed price.
 
 Amounts are fixed server-side (`DAILY_FEE_CENTS`, `CARD_AMOUNT_CENTS`,
@@ -77,7 +77,7 @@ Every payment is written `pending`, then settled by one DynamoDB transaction tha
 conditioned on `status = pending` and credits the balance. A second settle attempt
 fails the condition and does nothing.
 
-- **Cash** settles when the admin taps confirm (or deny) on the emailed link.
+- **Cash** settles when the admin taps confirm (or deny) on the page their notification opens, or on the Admin page.
 - **Card** settles when Stripe says the Checkout session is paid, learned from any of:
   the kiosk polling while the QR is up, the payer's phone landing on `/paid`, or the
   Stripe webhook. Each path re-reads the session from Stripe and checks the payment
@@ -111,4 +111,4 @@ Fees: Stripe 2.9% + $0.30 → $0.88 on a $20 payment (quarter pass $2.62, year p
 
 - `npm test` (backend): webhook signature verification, club-time day boundary (Pacific by default).
 - `node test/live-smoke.mjs`: end-to-end against the deployed stack with a throwaway
-  kiosk + player (cleaned up after; sends no email).
+  kiosk + player (cleaned up after; notifies nobody).
