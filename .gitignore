@@ -11,3 +11,4 @@ cdk.out/
 backend/test/.pure.test.mjs
 # scratch files
 .agents/
+test-results/

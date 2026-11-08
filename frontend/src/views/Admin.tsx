@@ -803,7 +803,7 @@ function PlayersTab() {
               <TableHeader>
                 <TableRow>
                   <TableHead>Name</TableHead>
-                  <TableHead>Plan</TableHead>
+                  <TableHead className="hidden sm:table-cell">Plan</TableHead>
                   <TableHead className="text-right">Balance</TableHead>
                   <TableHead className="w-10" />
                 </TableRow>
@@ -819,6 +819,8 @@ function PlayersTab() {
                         </Avatar>
                         <div className="min-w-0 flex-1">
                           <span className="font-medium">{p.name}</span>
+                          {/* On phones the Plan column is hidden, so say it here. */}
+                          {p.pass && <div className="text-xs text-success sm:hidden">{planName(p.pass.plan)}</div>}
                           <ContactLine p={p} />
                         </div>
                         {!(p.waiverVersion === versions?.waiver && p.rulesVersion === versions?.rules) && (
@@ -837,7 +839,7 @@ function PlayersTab() {
                         )}
                       </div>
                     </TableCell>
-                    <TableCell>
+                    <TableCell className="hidden sm:table-cell">
                       {p.pass ? (
                         <Badge variant="secondary" title={p.pass.label}>
                           <Ticket /> {planName(p.pass.plan)}

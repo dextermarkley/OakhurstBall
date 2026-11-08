@@ -4,7 +4,8 @@
 # Only run this after Dexter has approved this exact commit. The script checks:
 #   - --approved-by-dexter <sha> is given and matches HEAD
 #   - the working tree is clean (prod gets exactly a commit, never local edits)
-#   - alpha is running this same commit (so it was tested there first)
+#   - alpha is running this same commit
+#   - that commit passed the full test run on alpha (scripts/test-alpha.sh)
 # then deploys prod, checks the live site, and pushes the commit to publish-main.
 #   scripts/promote.sh --approved-by-dexter <sha>
 set -eu
@@ -22,6 +23,9 @@ case "$SHA" in "$2"*) ;; *) echo "Refusing: approval is for $2, but HEAD is $SHA
 ALPHA=$(aws cloudformation describe-stacks --stack-name OakhurstBasketballAlpha \
   --query "Stacks[0].Outputs[?OutputKey=='GitSha'].OutputValue" --output text)
 [ "$ALPHA" = "$SHA" ] || { echo "Refusing: alpha runs '$ALPHA', not $SHA. Run scripts/deploy-alpha.sh and test first."; exit 2; }
+TESTED=$(aws ssm get-parameter --name /oakhurst-alpha/tested-sha --query Parameter.Value --output text 2>/dev/null || true)
+case "$TESTED" in "$SHA "*) echo "== $SHA passed scripts/test-alpha.sh (${TESTED#* })";;
+  *) echo "Refusing: $SHA hasn't passed the full test run on alpha (last passed: ${TESTED:-none}). Run scripts/test-alpha.sh."; exit 2;; esac
 
 export OAKHURST_GIT_SHA="$SHA" OAKHURST_PROD=1
 echo "== building frontend for $SHA"
