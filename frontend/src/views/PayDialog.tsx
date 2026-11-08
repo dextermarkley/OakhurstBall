@@ -162,7 +162,7 @@ export function PayDialog({
               </DialogTitle>
               <DialogDescription>
                 For {sent.label}.{' '}
-                {sent.emailed ? `${sent.adminName} got an email to confirm it.` : `${sent.adminName} can confirm it on the Admin page.`}{' '}
+                {sent.emailed ? `${sent.adminName} got a notification to confirm it.` : `${sent.adminName} can confirm it on the Admin page.`}{' '}
                 {blocked
                   ? 'Once they confirm, tap Check in again.'
                   : canDefer

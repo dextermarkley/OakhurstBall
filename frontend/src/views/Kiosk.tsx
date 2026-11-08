@@ -17,7 +17,7 @@ import {
   CreditCard,
   Gift,
   Lock,
-  Mail,
+  Bell,
   QrCode,
   ScanLine,
   Search,
@@ -774,13 +774,13 @@ export function Kiosk() {
 
           {step === 'cashwait' && cash && buying && (
             <Centered>
-              <IconBubble tone="brand">{cash.emailed ? <Mail className="size-7" /> : <Banknote className="size-7" />}</IconBubble>
+              <IconBubble tone="brand">{cash.emailed ? <Bell className="size-7" /> : <Banknote className="size-7" />}</IconBubble>
               <h1 className="text-2xl font-semibold tracking-tight">
                 Hand {money(buying.amountCents)} to {cash.adminName}
               </h1>
               <p className="mt-2 text-muted-foreground">{buying.what}</p>
               <p className="mt-6">
-                {cash.emailed ? `${cash.adminName} got an email to confirm it.` : `${cash.adminName} can confirm it on the Admin page.`}
+                {cash.emailed ? `${cash.adminName} got a notification to confirm it.` : `${cash.adminName} can confirm it on the Admin page.`}
               </p>
               <p className="mt-2 inline-flex items-center gap-2 text-sm text-muted-foreground">
                 <Spinner />
