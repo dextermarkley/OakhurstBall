@@ -15,6 +15,7 @@ import { InputOTP, InputOTPGroup, InputOTPSlot } from '@/components/ui/input-otp
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Spinner } from '@/components/ui/spinner';
 import { disableNotifications } from '@/notifications';
+import { AgreementsGate } from './Agreements';
 
 type Mode = 'signin' | 'signup' | 'confirm';
 
@@ -55,7 +56,7 @@ export function AuthGate({ children }: { children: (signOut: () => void) => Reac
       </div>
     );
   }
-  if (authed) return <>{children(doSignOut)}</>;
+  if (authed) return <AgreementsGate onSignOut={doSignOut}>{children(doSignOut)}</AgreementsGate>;
 
   return (
     <div className="safe-top flex min-h-dvh flex-col items-center justify-center bg-gradient-to-b from-secondary/60 to-background px-4 py-10">
@@ -196,6 +197,7 @@ function SignUpForm({ onDone, onSwitch }: { onDone: (c: { email: string; passwor
             autoComplete="new-password"
             description="At least 8 characters, with a lowercase letter and a number."
           />
+          <p className="text-xs text-muted-foreground">After you confirm your email, you’ll sign the club waiver and agree to the club rules.</p>
         </FieldGroup>
       </CardContent>
       <CardFooter className="mt-2 flex-col gap-3">

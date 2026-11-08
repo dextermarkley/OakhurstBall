@@ -83,6 +83,7 @@ import {
   vapidPublicKey,
 } from '../lib/push.js';
 import { addExpense, checkExpense, deleteExpense, expenseReport, updateExpense } from '../lib/expenses.js';
+import { RULES, WAIVER, checkSignature, isCurrent, recordAgreements } from '../lib/agreements.js';
 import {
   DEFAULT_ANNOUNCEMENT,
   cleanText,
@@ -659,6 +660,40 @@ async function apiRouter(
     return ok(r);
   }
 
+  // ── Waiver + club rules ──
+  // GET  /api/me/agreements → { waiver, rules, current, signed }
+  // POST /api/me/agreements { waiverVersion, rulesVersion, agreeRules, agreeWaiver,
+  //                           signedName, adult, guardianName? }
+  if (path === '/api/me/agreements' && m === 'GET') {
+    const player = await getPlayerByCognitoSub(claims.sub);
+    return ok({
+      waiver: WAIVER,
+      rules: RULES,
+      hasPlayer: !!player,
+      current: isCurrent(player as any),
+      signed: player && (player as any).agreedAt
+        ? {
+            waiverVersion: (player as any).waiverVersion,
+            rulesVersion: (player as any).rulesVersion,
+            agreedAt: (player as any).agreedAt,
+            signedName: (player as any).signedName,
+          }
+        : null,
+    });
+  }
+  if (path === '/api/me/agreements' && m === 'POST') {
+    const player = await getPlayerByCognitoSub(claims.sub);
+    if (!player) return notFound('no linked player profile');
+    const { sig, error } = checkSignature(parseBody(event));
+    if (error) return badRequest(error);
+    const agreedAt = await recordAgreements(player.playerId, sig!, {
+      sub: claims.sub,
+      ip: event.requestContext?.http?.sourceIp,
+      userAgent: event.requestContext?.http?.userAgent,
+    });
+    return ok({ current: true, agreedAt });
+  }
+
   // POST /api/me/pin  { pin }  — player sets their own kiosk PIN
   if (path === '/api/me/pin' && m === 'POST') {
     const { pin } = parseBody(event);
@@ -677,6 +712,7 @@ async function apiRouter(
     const [players, holders] = await Promise.all([listPlayers(), currentPassHolders()]);
     return ok({
       players: players.map((p) => ({ ...p, pass: passView(holders.get(p.playerId) ?? null) })),
+      agreementVersions: { waiver: WAIVER.version, rules: RULES.version },
       plans: purchasable(null),
     });
   }

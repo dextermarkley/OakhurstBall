@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
-import { Bell, BellOff, Download, Home, LogOut, MessagesSquare, RefreshCw, Repeat } from 'lucide-react';
+import { Bell, BellOff, Download, Home, LogOut, MessagesSquare, RefreshCw, Repeat, ScrollText } from 'lucide-react';
+import { AgreementsDialog } from '@/views/Agreements';
 import { promptInstall, useInstall } from '@/install';
 import { InstallHelpDialog } from '@/components/install-banner';
 import { useChatUnread } from '@/chat-unread';
@@ -102,6 +103,7 @@ function UserMenu({ user, onSignOut }: { user: ShellUser; onSignOut: () => void 
   const inst = useInstall();
   const [help, setHelp] = useState(false);
   const [installHelp, setInstallHelp] = useState(false);
+  const [docs, setDocs] = useState(false);
   const canInstall = inst.kind !== 'none' && !inst.installed;
   async function install() {
     if (inst.canPrompt && (await promptInstall()) !== 'unavailable') return;
@@ -111,6 +113,7 @@ function UserMenu({ user, onSignOut }: { user: ShellUser; onSignOut: () => void 
     <>
     <NotifyHelpDialog open={help} onClose={() => setHelp(false)} isAdmin={user.isAdmin} />
     <InstallHelpDialog open={installHelp} onClose={() => setInstallHelp(false)} kind={inst.kind} />
+    <AgreementsDialog open={docs} onClose={() => setDocs(false)} />
     <DropdownMenu>
       <DropdownMenuTrigger
         render={
@@ -154,6 +157,9 @@ function UserMenu({ user, onSignOut }: { user: ShellUser; onSignOut: () => void 
             {n.subscribed ? 'Notifications on' : 'Turn on notifications'}
           </DropdownMenuItem>
         )}
+        <DropdownMenuItem onClick={() => setDocs(true)}>
+          <ScrollText /> Waiver & club rules
+        </DropdownMenuItem>
         <DropdownMenuItem onClick={onSignOut}>
           <LogOut /> Sign out
         </DropdownMenuItem>

@@ -152,3 +152,38 @@ test('expense seasons run Apr 1 – Mar 31', () => {
   assert.deepEqual(seasonRange(2026), { start: '2026-04-01', end: '2027-03-31' });
   assert.equal(seasonLabel(2026), '2026–27 season');
 });
+
+// ── Waiver + rules signature validation ──
+import { checkSignature, isCurrent, WAIVER, RULES } from '../src/lib/agreements.js';
+
+const goodSig = {
+  waiverVersion: WAIVER.version,
+  rulesVersion: RULES.version,
+  agreeRules: true,
+  agreeWaiver: true,
+  signedName: '  Jordan   Ellis ',
+  adult: true,
+};
+
+test('signature: an adult signing both is accepted, name tidied', () => {
+  assert.deepEqual(checkSignature(goodSig).sig, { signedName: 'Jordan Ellis', adult: true, guardianName: undefined });
+});
+
+test('signature: a minor needs a guardian name', () => {
+  assert.ok(checkSignature({ ...goodSig, adult: false }).error);
+  assert.deepEqual(checkSignature({ ...goodSig, adult: false, guardianName: 'Pat Ellis' }).sig?.guardianName, 'Pat Ellis');
+});
+
+test('signature: missing pieces are rejected', () => {
+  assert.ok(checkSignature({ ...goodSig, agreeRules: false }).error, 'rules not acknowledged');
+  assert.ok(checkSignature({ ...goodSig, agreeWaiver: 'yes' }).error, 'waiver not agreed');
+  assert.ok(checkSignature({ ...goodSig, signedName: 'Jordan' }).error, 'first name only');
+  assert.ok(checkSignature({ ...goodSig, waiverVersion: '2020-01-01' }).error, 'stale waiver version');
+  assert.ok(checkSignature({ ...goodSig, adult: undefined }).error, 'age not answered');
+});
+
+test('agreements are current only for the latest versions of both', () => {
+  assert.equal(isCurrent({ waiverVersion: WAIVER.version, rulesVersion: RULES.version }), true);
+  assert.equal(isCurrent({ waiverVersion: WAIVER.version, rulesVersion: 'old' }), false);
+  assert.equal(isCurrent(null), false);
+});

@@ -212,6 +212,25 @@ export const api = {
       { headers: await authHeaders() },
     );
   },
+  // waiver + club rules
+  async agreements() {
+    return req<AgreementsStatus>('/api/me/agreements', { headers: await authHeaders() });
+  },
+  async signAgreements(b: {
+    waiverVersion: string;
+    rulesVersion: string;
+    agreeRules: boolean;
+    agreeWaiver: boolean;
+    signedName: string;
+    adult: boolean;
+    guardianName?: string;
+  }) {
+    return req<{ current: boolean; agreedAt: string }>('/api/me/agreements', {
+      method: 'POST',
+      headers: await authHeaders(),
+      body: JSON.stringify(b),
+    });
+  },
   // expenses
   async expenses(season?: number) {
     return req<ExpenseReport>(`/api/admin/expenses${season ? `?season=${season}` : ''}`, { headers: await authHeaders() });
@@ -296,6 +315,21 @@ export const api = {
     });
   },
 };
+
+export interface AgreementDoc {
+  kind: 'waiver' | 'rules';
+  version: string;
+  title: string;
+  intro: string;
+  sections: Array<{ heading?: string; body: string }>;
+}
+export interface AgreementsStatus {
+  waiver: AgreementDoc;
+  rules: AgreementDoc;
+  hasPlayer: boolean;
+  current: boolean;
+  signed: { waiverVersion: string; rulesVersion: string; agreedAt: string; signedName: string } | null;
+}
 
 export type ExpenseCategory = 'basketballs' | 'insurance' | 'facility' | 'other';
 export interface ExpenseInput {

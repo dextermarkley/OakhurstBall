@@ -543,6 +543,7 @@ function PlayersTab() {
   const confirm = useConfirm();
   const [players, setPlayers] = useState<any[] | null>(null);
   const [plans, setPlans] = useState<PlanOffer[]>([]);
+  const [versions, setVersions] = useState<{ waiver: string; rules: string } | null>(null);
   const [q, setQ] = useState('');
   const [adding, setAdding] = useState(false);
   const [charging, setCharging] = useState<any>(null);
@@ -552,6 +553,7 @@ function PlayersTab() {
       const r = await api.adminPlayers();
       setPlayers(r.players);
       setPlans(r.plans ?? []);
+      setVersions(r.agreementVersions ?? null);
     } catch (e: any) {
       toast.error(e.message);
     }
@@ -625,6 +627,15 @@ function PlayersTab() {
                           <AvatarFallback className="text-xs">{initials(p.name)}</AvatarFallback>
                         </Avatar>
                         <span className="font-medium">{p.name}</span>
+                        {!(p.waiverVersion === versions?.waiver && p.rulesVersion === versions?.rules) && (
+                          <Badge
+                            variant="outline"
+                            className="border-brand/40 text-brand"
+                            title={p.agreedAt ? 'Signed an older version; asked again at next sign-in' : 'Asked to sign at next sign-in'}
+                          >
+                            {p.agreedAt ? 'Waiver outdated' : 'No waiver'}
+                          </Badge>
+                        )}
                       </div>
                     </TableCell>
                     <TableCell>

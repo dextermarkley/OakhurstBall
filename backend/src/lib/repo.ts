@@ -78,7 +78,14 @@ export async function listPlayers(): Promise<PublicPlayer[]> {
     }),
   );
   return (r.Items ?? [])
-    .map((i: any) => ({ playerId: i.playerId, name: i.name, balanceCents: i.balanceCents }))
+    .map((i: any) => ({
+      playerId: i.playerId,
+      name: i.name,
+      balanceCents: i.balanceCents,
+      waiverVersion: i.waiverVersion,
+      rulesVersion: i.rulesVersion,
+      agreedAt: i.agreedAt,
+    }))
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 

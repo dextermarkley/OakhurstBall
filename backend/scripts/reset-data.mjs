@@ -70,7 +70,9 @@ const keep = (i) =>
   (i.PK.startsWith('PLAYER#') && i.SK === 'PROFILE' && keptPlayerIds.has(i.playerId)) ||
   (i.PK.startsWith('ADMIN#') && keepEmails.has((i.email ?? '').toLowerCase())) ||
   (i.PK.startsWith('KIOSK#') && !includeKiosks) ||
-  (i.PK === 'EXPENSE' && !includeExpenses); // the club's books: kept unless asked
+  (i.PK === 'EXPENSE' && !includeExpenses) || // the club's books: kept unless asked
+  // Kept players' signed waivers stay with their profile (which records the version).
+  (i.PK.startsWith('PLAYER#') && i.SK.startsWith('AGREEMENT#') && keptPlayerIds.has(i.PK.slice('PLAYER#'.length)));
 const kept = items.filter(keep);
 const drop = items.filter((i) => !keep(i));
 

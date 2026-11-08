@@ -75,4 +75,8 @@ export interface PublicPlayer {
   playerId: string;
   name: string;
   balanceCents: number;
+  /** Signed waiver / acknowledged rules versions (see agreements.ts). */
+  waiverVersion?: string;
+  rulesVersion?: string;
+  agreedAt?: string;
 }
