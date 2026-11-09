@@ -57,7 +57,7 @@ Run one: `cd backend && AWS_REGION=us-west-2 node test/live-<name>.mjs`.
 | player | iPhone | one-time contact step for older accounts; account page totals, history "Show older", edit contact + PIN; Pay now with cash |
 | stripe | iPhone | Pay now by card through Stripe Checkout (test card), credit lands; a refund in Stripe takes it back through the webhook |
 | chat | 2 iPhones | two members chat: text, a photo, live updates, deletes |
-| admin | desktop | every tab; confirm a player's cash; post + take down a notice; announcement with RSVP; expenses; add a kiosk-only player with contact; pair and remove a kiosk |
+| admin | desktop | every tab (no separate Admins tab: admins are managed from Players); confirm a player's cash; post + take down a notice; announcement with RSVP; expenses; add a kiosk-only player with contact; pair and remove a kiosk |
 | kiosk | iPad + desktop | admin opens the gym; kiosk check-in with wrong/right PIN; a player at the limit pays cash, admin confirms, kiosk checks them in; admin closes the gym |
 | layout | phone, tablet, desktop | every screen loads with no errors and nothing sticks out sideways |
 

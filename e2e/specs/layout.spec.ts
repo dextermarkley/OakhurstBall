@@ -41,7 +41,7 @@ for (const [label, width, height] of WIDTHS) {
     await expect(page.getByText('Oakhurst chat')).toBeVisible({ timeout: 30000 });
     await expectNoOverflow(page);
 
-    for (const tab of ['overview', 'sessions', 'players', 'payments', 'expenses', 'admins', 'kiosks']) {
+    for (const tab of ['overview', 'sessions', 'players', 'payments', 'expenses', 'kiosks']) {
       await page.goto(`/admin?tab=${tab}`);
       await expect(page.getByRole('tab', { name: 'Overview' })).toBeVisible({ timeout: 30000 });
       await page.waitForLoadState('networkidle');

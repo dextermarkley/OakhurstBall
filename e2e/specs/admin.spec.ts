@@ -48,7 +48,7 @@ test('every admin tab loads', async ({ page }) => {
   await openAdmin(page);
   for (const [tab, heading] of [
     ['Overview', 'Overview'], ['Sessions', 'Sessions'], ['Players', 'Players'], ['Payments', 'Payments'],
-    ['Expenses', 'Expenses'], ['Admins', 'Admins'], ['Kiosks', 'Kiosks'],
+    ['Expenses', 'Expenses'], ['Kiosks', 'Kiosks'],
   ]) {
     await page.getByRole('tab', { name: tab, exact: true }).click();
     await expect(page.getByRole('heading', { name: heading, exact: true }).first()).toBeVisible();

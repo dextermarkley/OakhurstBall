@@ -13,7 +13,6 @@ import {
   DoorOpen,
   Inbox,
   MoreHorizontal,
-  Plus,
   QrCode,
   Search,
   ShieldCheck,
@@ -76,7 +75,7 @@ export function Admin() {
   return <AuthGate>{(signOut) => <AdminInner signOut={signOut} />}</AuthGate>;
 }
 
-type TabId = 'overview' | 'sessions' | 'players' | 'payments' | 'expenses' | 'admins' | 'kiosks';
+type TabId = 'overview' | 'sessions' | 'players' | 'payments' | 'expenses' | 'kiosks';
 
 function AdminInner({ signOut }: { signOut: () => void }) {
   const [me, setMe] = useState<any>(null);
@@ -84,7 +83,7 @@ function AdminInner({ signOut }: { signOut: () => void }) {
   // ?tab=players (e.g. from the "New sign-up" notification) opens that tab.
   const [tab, setTab] = useState<TabId>(() => {
     const t = new URLSearchParams(window.location.search).get('tab');
-    return (['overview', 'sessions', 'players', 'payments', 'expenses', 'admins', 'kiosks'] as const).includes(t as TabId)
+    return (['overview', 'sessions', 'players', 'payments', 'expenses', 'kiosks'] as const).includes(t as TabId)
       ? (t as TabId)
       : 'overview';
   });
@@ -129,7 +128,6 @@ function AdminInner({ signOut }: { signOut: () => void }) {
               <TabsTrigger value="players">Players</TabsTrigger>
               <TabsTrigger value="payments">Payments</TabsTrigger>
               <TabsTrigger value="expenses">Expenses</TabsTrigger>
-              <TabsTrigger value="admins">Admins</TabsTrigger>
               <TabsTrigger value="kiosks">Kiosks</TabsTrigger>
             </TabsList>
           </div>
@@ -147,9 +145,6 @@ function AdminInner({ signOut }: { signOut: () => void }) {
           </TabsContent>
           <TabsContent value="expenses">
             <ExpensesTab />
-          </TabsContent>
-          <TabsContent value="admins">
-            <AdminsTab />
           </TabsContent>
           <TabsContent value="kiosks">
             <KiosksTab />
@@ -683,6 +678,8 @@ function PlayersTab() {
   const [plans, setPlans] = useState<PlanOffer[]>([]);
   const [versions, setVersions] = useState<{ waiver: string; rules: string } | null>(null);
   const [q, setQ] = useState('');
+  // Admins only (they're managed here: ⋯ → Make admin / Remove admin).
+  const [onlyAdmins, setOnlyAdmins] = useState(() => new URLSearchParams(window.location.search).get('filter') === 'admins');
   const [adding, setAdding] = useState(false);
   const [charging, setCharging] = useState<any>(null);
 
@@ -700,7 +697,10 @@ function PlayersTab() {
     load();
   }, [load]);
 
-  const shown = (players ?? []).filter((p) => p.name.toLowerCase().includes(q.trim().toLowerCase()));
+  const shown = (players ?? []).filter(
+    (p) => p.name.toLowerCase().includes(q.trim().toLowerCase()) && (!onlyAdmins || p.isAdmin),
+  );
+  const adminCount = (players ?? []).filter((p) => p.isAdmin).length;
   // Self sign-ups waiting for an admin (players added by an admin are approved already).
   const pending = (players ?? []).filter((p) => p.hasAccount && !p.approved && !p.isAdmin);
 
@@ -812,9 +812,27 @@ function PlayersTab() {
 
       <Card>
         <CardHeader>
-          <div className="relative w-full sm:max-w-xs">
-            <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
-            <Input placeholder="Search players" value={q} onChange={(e) => setQ(e.target.value)} className="pl-8" aria-label="Search players" />
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="relative w-full sm:max-w-xs">
+              <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
+              <Input placeholder="Search players" value={q} onChange={(e) => setQ(e.target.value)} className="pl-8" aria-label="Search players" />
+            </div>
+            <div role="group" aria-label="Show" className="inline-flex rounded-lg border p-0.5 text-sm">
+              {[
+                [false, 'Everyone'],
+                [true, `Admins${players ? ` (${adminCount})` : ''}`],
+              ].map(([v, label]) => (
+                <button
+                  key={String(v)}
+                  type="button"
+                  aria-pressed={onlyAdmins === v}
+                  onClick={() => setOnlyAdmins(v as boolean)}
+                  className={cn('rounded-md px-3 py-1', onlyAdmins === v ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted')}
+                >
+                  {label as string}
+                </button>
+              ))}
+            </div>
           </div>
         </CardHeader>
         <CardContent className="pt-2">
@@ -825,7 +843,7 @@ function PlayersTab() {
               ))}
             </div>
           ) : shown.length === 0 ? (
-            <p className="py-10 text-center text-sm text-muted-foreground">No players found.</p>
+            <p className="py-10 text-center text-sm text-muted-foreground">{onlyAdmins && !q.trim() ? 'No admins yet.' : 'No players found.'}</p>
           ) : (
             <Table>
               <TableHeader>
@@ -1171,167 +1189,6 @@ function PaymentsTab() {
           )}
         </CardContent>
       </Card>
-    </div>
-  );
-}
-
-/* ───────────────────────────── Admins ───────────────────────────── */
-
-const adminSchema = z.object({
-  name: z.string().trim().min(2, 'Enter a name'),
-  email: z.string().trim().toLowerCase().email('Enter a valid email'),
-});
-const emailSchema = z.object({ email: z.string().trim().toLowerCase().email('Enter a valid email') });
-
-function AdminsTab() {
-  const [admins, setAdmins] = useState<any[] | null>(null);
-  const [adding, setAdding] = useState(false);
-  const [editing, setEditing] = useState<any>(null);
-
-  const load = useCallback(async () => {
-    try {
-      setAdmins((await api.admins()).admins);
-    } catch (e: any) {
-      toast.error(e.message);
-    }
-  }, []);
-  useEffect(() => {
-    load();
-  }, [load]);
-
-  const addForm = useForm<z.infer<typeof adminSchema>>({ resolver: zodResolver(adminSchema), defaultValues: { name: '', email: '' } });
-  const editForm = useForm<z.infer<typeof emailSchema>>({ resolver: zodResolver(emailSchema), defaultValues: { email: '' } });
-
-  const add = addForm.handleSubmit(async (v) => {
-    try {
-      await api.createAdmin(v);
-      toast.success(`${v.name} can now receive cash.`);
-      addForm.reset();
-      setAdding(false);
-      load();
-    } catch (e: any) {
-      toast.error(e.message);
-    }
-  });
-  const save = editForm.handleSubmit(async (v) => {
-    try {
-      await api.setAdminEmail(editing.adminId, v.email);
-      toast.success('Email updated.');
-      setEditing(null);
-      load();
-    } catch (e: any) {
-      toast.error(e.message);
-    }
-  });
-
-  return (
-    <div className="space-y-6">
-      <PageHeader
-        title="Admins"
-        description="People players can hand cash to. Each gets an app notification to confirm the payment, sent to the account that signs in with this email, so they should turn notifications on. This list doesn’t give anyone access to the dashboard."
-        actions={
-          <Button onClick={() => setAdding(true)}>
-            <Plus /> Add admin
-          </Button>
-        }
-      />
-      <Card>
-        <CardContent>
-          {admins === null ? (
-            <Skeleton className="h-24" />
-          ) : admins.length === 0 ? (
-            <p className="py-10 text-center text-sm text-muted-foreground">No admins yet.</p>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Name</TableHead>
-                  <TableHead>Sign-in email</TableHead>
-                  <TableHead className="w-24" />
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {admins.map((a) => (
-                  <TableRow key={a.adminId}>
-                    <TableCell>
-                      <div className="flex items-center gap-2.5">
-                        <Avatar className="size-8">
-                          <AvatarFallback className="text-xs">{initials(a.name)}</AvatarFallback>
-                        </Avatar>
-                        <span className="font-medium">{a.name}</span>
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      {a.email ? (
-                        <span className="text-muted-foreground">{a.email}</span>
-                      ) : (
-                        <Badge variant="destructive">No email set</Badge>
-                      )}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => {
-                          editForm.reset({ email: a.email ?? '' });
-                          setEditing(a);
-                        }}
-                      >
-                        Edit
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          )}
-        </CardContent>
-      </Card>
-
-      <Dialog open={adding} onOpenChange={setAdding}>
-        <DialogContent className="sm:max-w-md">
-          <form onSubmit={add} noValidate>
-            <DialogHeader>
-              <DialogTitle>Add admin</DialogTitle>
-              <DialogDescription>They’ll appear in the kiosk’s list of people to hand cash to.</DialogDescription>
-            </DialogHeader>
-            <FieldGroup className="py-5">
-              <FormInput control={addForm.control} name="name" label="Name" autoComplete="off" />
-              <FormInput control={addForm.control} name="email" label="Email" type="email" autoComplete="off" />
-            </FieldGroup>
-            <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => setAdding(false)}>
-                Cancel
-              </Button>
-              <Button type="submit" disabled={addForm.formState.isSubmitting}>
-                {addForm.formState.isSubmitting && <Spinner />} Add admin
-              </Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={!!editing} onOpenChange={(o) => !o && setEditing(null)}>
-        <DialogContent className="sm:max-w-md">
-          <form onSubmit={save} noValidate>
-            <DialogHeader>
-              <DialogTitle>Edit {editing?.name}’s email</DialogTitle>
-              <DialogDescription>The email they sign in with. Cash notifications go to that account.</DialogDescription>
-            </DialogHeader>
-            <FieldGroup className="py-5">
-              <FormInput control={editForm.control} name="email" label="Email" type="email" autoComplete="off" />
-            </FieldGroup>
-            <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => setEditing(null)}>
-                Cancel
-              </Button>
-              <Button type="submit" disabled={editForm.formState.isSubmitting}>
-                {editForm.formState.isSubmitting && <Spinner />} Save
-              </Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }
