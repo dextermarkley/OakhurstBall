@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import QRCode from 'qrcode';
 import { useForm } from 'react-hook-form';
@@ -633,25 +633,94 @@ function AttendeeTable({ attendees }: { attendees: Attendee[] }) {
 
 /* ───────────────────────────── Players ───────────────────────────── */
 
-/** Phone + emergency contact on the players list (tap a number to call it). */
-function ContactLine({ p }: { p: any }) {
-  const tel = (e164: string) => (
-    <a href={`tel:${e164}`} className="underline-offset-2 hover:underline" onClick={(e) => e.stopPropagation()}>
-      {phoneText(e164)}
-    </a>
+/** Admin → Players: tap a player for their contact details and statuses. */
+function PlayerSheet({ p, versions, onClose }: { p: any | null; versions?: { waiver: string; rules: string }; onClose: () => void }) {
+  const tel = (e164?: string) =>
+    e164 ? (
+      <a href={`tel:${e164}`} className="font-medium text-primary underline-offset-2 hover:underline">
+        {phoneText(e164)}
+      </a>
+    ) : null;
+  const missing = (what: string) => (
+    <span className="text-muted-foreground">{p?.hasAccount ? `${what} not given yet (asked at next sign-in)` : 'Not given'}</span>
   );
-  if (!p.phone && !p.emergencyPhone) {
-    return p.hasAccount ? <div className="text-xs text-brand">No contact details yet (asked at next sign-in)</div> : null;
-  }
-  return (
-    <div className="text-xs break-words text-muted-foreground">
-      {p.phone && tel(p.phone)}
-      {p.emergencyPhone && (
-        <>
-          {p.phone && ' · '}Emergency: {p.emergencyName} {tel(p.emergencyPhone)}
-        </>
-      )}
+  const current = p && p.waiverVersion === versions?.waiver && p.rulesVersion === versions?.rules;
+  const Row = ({ label, children }: { label: string; children: ReactNode }) => (
+    <div className="grid grid-cols-[8.5rem_1fr] gap-3 py-2 text-sm">
+      <dt className="text-muted-foreground">{label}</dt>
+      <dd className="min-w-0 break-words">{children}</dd>
     </div>
+  );
+  return (
+    <Sheet open={!!p} onOpenChange={(o) => !o && onClose()}>
+      <SheetContent className="w-full sm:max-w-md">
+        {p && (
+          <>
+            <SheetHeader>
+              <SheetTitle className="flex items-center gap-2.5">
+                <Avatar className="size-9">
+                  <AvatarFallback className="text-xs">{initials(p.name)}</AvatarFallback>
+                </Avatar>
+                {p.name}
+              </SheetTitle>
+              <SheetDescription>{p.createdAt ? `Joined ${longDateOf(p.createdAt)}` : 'Player'}</SheetDescription>
+            </SheetHeader>
+            <div className="overflow-y-auto px-4 pb-6">
+              <h3 className="mt-2 text-xs font-medium tracking-wide text-muted-foreground uppercase">Contact</h3>
+              <dl className="divide-y">
+                <Row label="Email">
+                  {p.email ? (
+                    <a href={`mailto:${p.email}`} className="font-medium text-primary underline-offset-2 hover:underline">
+                      {p.email}
+                    </a>
+                  ) : (
+                    <span className="text-muted-foreground">None</span>
+                  )}
+                </Row>
+                <Row label="Phone">{tel(p.phone) ?? missing('Phone')}</Row>
+                <Row label="Emergency contact">
+                  {p.emergencyName || p.emergencyPhone ? (
+                    <>
+                      <div>{p.emergencyName ?? 'No name given'}</div>
+                      {tel(p.emergencyPhone)}
+                    </>
+                  ) : (
+                    missing('Emergency contact')
+                  )}
+                </Row>
+              </dl>
+              <h3 className="mt-5 text-xs font-medium tracking-wide text-muted-foreground uppercase">Status</h3>
+              <dl className="divide-y">
+                <Row label="Account">{p.hasAccount ? 'Signed up in the app' : 'Added by an admin (kiosk only)'}</Row>
+                <Row label="Admin">{p.isAdmin ? 'Yes' : 'No'}</Row>
+                <Row label="Chat">
+                  {!p.hasAccount ? (
+                    <span className="text-muted-foreground">No account</span>
+                  ) : p.isAdmin || p.approved ? (
+                    'Approved'
+                  ) : (
+                    <span className="text-brand">Waiting for approval</span>
+                  )}
+                </Row>
+                <Row label="Waiver + rules">
+                  {current ? (
+                    `Signed ${p.agreedAt ? longDateOf(p.agreedAt) : ''}`.trim()
+                  ) : p.agreedAt ? (
+                    <span className="text-brand">Older version, signed {longDateOf(p.agreedAt)}. Asked again at next check-in.</span>
+                  ) : (
+                    <span className="text-brand">Not signed. Asked at next check-in.</span>
+                  )}
+                </Row>
+                <Row label="Plan">{p.pass ? `${planName(p.pass.plan)} · ${p.pass.label}` : 'Pay as you go'}</Row>
+                <Row label="Balance">
+                  <span className={cn('tabular font-medium', p.balanceCents < 0 && 'text-destructive')}>{balanceText(p.balanceCents)}</span>
+                </Row>
+              </dl>
+            </div>
+          </>
+        )}
+      </SheetContent>
+    </Sheet>
   );
 }
 
@@ -682,6 +751,7 @@ function PlayersTab() {
   const [onlyAdmins, setOnlyAdmins] = useState(() => new URLSearchParams(window.location.search).get('filter') === 'admins');
   const [adding, setAdding] = useState(false);
   const [charging, setCharging] = useState<any>(null);
+  const [viewing, setViewing] = useState<any>(null);
 
   const load = useCallback(async () => {
     try {
@@ -789,19 +859,25 @@ function PlayersTab() {
           </CardHeader>
           <CardContent className="space-y-2">
             {pending.map((p) => (
-              <div key={p.playerId} className="flex flex-wrap items-center gap-3 rounded-lg border p-3">
+              <div
+                key={p.playerId}
+                className="flex cursor-pointer flex-wrap items-center gap-3 rounded-lg border p-3 hover:bg-muted/40"
+                onClick={() => setViewing(p)}
+              >
                 <Avatar className="size-8">
                   <AvatarFallback className="text-xs">{initials(p.name)}</AvatarFallback>
                 </Avatar>
                 <div className="min-w-0 flex-1">
                   <div className="truncate font-medium">{p.name}</div>
-                  <div className="truncate text-xs text-muted-foreground">
-                    {p.email ?? 'No email'}
-                    {p.createdAt && ` · joined ${longDateOf(p.createdAt)}`}
-                  </div>
-                  <ContactLine p={p} />
+                  {p.createdAt && <div className="truncate text-xs text-muted-foreground">Joined {longDateOf(p.createdAt)}</div>}
                 </div>
-                <Button size="sm" onClick={() => approve(p, true)}>
+                <Button
+                  size="sm"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    approve(p, true);
+                  }}
+                >
                   <UserCheck /> Approve
                 </Button>
               </div>
@@ -856,7 +932,7 @@ function PlayersTab() {
               </TableHeader>
               <TableBody>
                 {shown.map((p) => (
-                  <TableRow key={p.playerId}>
+                  <TableRow key={p.playerId} className="cursor-pointer" onClick={() => setViewing(p)}>
                     {/* Wraps on a phone, so Plan and Balance stay on screen. */}
                     <TableCell className="whitespace-normal">
                       <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
@@ -867,7 +943,6 @@ function PlayersTab() {
                           <span className="font-medium">{p.name}</span>
                           {/* On phones the Plan column is hidden, so say it here. */}
                           {p.pass && <div className="text-xs text-success sm:hidden">{planName(p.pass.plan)}</div>}
-                          <ContactLine p={p} />
                         </div>
                         {!(p.waiverVersion === versions?.waiver && p.rulesVersion === versions?.rules) && (
                           <Badge
@@ -902,7 +977,7 @@ function PlayersTab() {
                     <TableCell className={cn('tabular text-right font-medium', p.balanceCents < 0 && 'text-destructive')}>
                       {balanceText(p.balanceCents)}
                     </TableCell>
-                    <TableCell>
+                    <TableCell onClick={(e) => e.stopPropagation()}>
                       <DropdownMenu>
                         <DropdownMenuTrigger
                           render={
@@ -968,6 +1043,7 @@ function PlayersTab() {
 
       <AddPlayerDialog open={adding} onOpenChange={setAdding} onDone={load} />
       <ChargeDialog player={charging} onClose={() => setCharging(null)} onDone={load} />
+      <PlayerSheet p={viewing} versions={versions ?? undefined} onClose={() => setViewing(null)} />
     </div>
   );
 }

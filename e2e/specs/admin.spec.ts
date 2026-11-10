@@ -167,9 +167,20 @@ test('add a kiosk-only player with contact details', async ({ page }) => {
   await d.getByRole('button', { name: 'Add player' }).click();
   await expect(page.getByText(`${name} added.`)).toBeVisible();
   const row = page.locator('tr', { hasText: name });
-  await expect(row).toContainText('(415) 555-0166');
-  await expect(row).toContainText('Emergency: ZZ E2E Sibling (510) 555-0166');
-  await expect(row.locator('a[href="tel:+15105550166"]')).toHaveCount(1);
+  // The list doesn't show contact details; tapping the player does.
+  await expect(row).not.toContainText('555-0166');
+  await row.getByText(name).click();
+  const sheet = page.getByRole('dialog');
+  await expect(sheet).toContainText('(415) 555-0166');
+  await expect(sheet).toContainText('ZZ E2E Sibling');
+  await expect(sheet.locator('a[href="tel:+15105550166"]')).toHaveCount(1);
+  await expect(sheet).toContainText('Added by an admin (kiosk only)');
+  await expect(sheet).toContainText('Pay as you go');
+  await page.keyboard.press('Escape');
+  // An account holder's email and statuses.
+  await page.locator('tr', { hasText: admin.name }).getByText(admin.name).click();
+  await expect(page.getByRole('dialog')).toContainText(admin.email);
+  await expect(page.getByRole('dialog')).toContainText('Signed up in the app');
   w.assertClean();
 });
 
