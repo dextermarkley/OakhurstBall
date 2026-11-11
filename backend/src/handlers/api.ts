@@ -1091,8 +1091,10 @@ async function apiRouter(
   // POST /api/admin/expenses/delete {cursor}
   if (path === '/api/admin/expenses' && m === 'GET') {
     const s = event.queryStringParameters?.season;
+    const q = event.queryStringParameters?.quarter;
     if (s != null && !/^20\d\d$/.test(s)) return badRequest('season must be a year like 2026');
-    return ok(await expenseReport(s ? Number(s) : undefined));
+    if (q != null && !/^[1-4]$/.test(q)) return badRequest('quarter must be 1, 2, 3 or 4');
+    return ok(await expenseReport(s ? Number(s) : undefined, q ? (Number(q) as 1 | 2 | 3 | 4) : undefined));
   }
   if (path === '/api/admin/expenses' && m === 'POST') {
     const { input, error } = checkExpense(parseBody(event), clubDate());

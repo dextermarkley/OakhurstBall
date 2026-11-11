@@ -92,6 +92,21 @@ try {
   check('old entry gone, moved one present once', r.body.expenses.filter((e) => e.expenseId === balls.expenseId).length === 1 && r.body.expenses.find((e) => e.expenseId === balls.expenseId)?.date === start, r.body.expenses.length);
   check('this month no longer counts the moved one', r.body.monthCents - before.monthCents === 12345 || start.slice(0, 7) === today.slice(0, 7), r.body.monthCents);
 
+  // By quarter: Q1 holds the moved basketballs; the quarter we're in holds today's facility fee.
+  r = await A('GET', `/admin/expenses?season=${after.season.year}&quarter=1`);
+  check('Q1 view: starts Apr 1, has the moved basketballs', r.status === 200 && r.body.period.quarter === 1 && r.body.period.start === start &&
+    r.body.expenses.some((e) => e.expenseId === balls.expenseId), r.body?.period);
+  const curQ = r.body.quarters.length;
+  r = await A('GET', `/admin/expenses?season=${after.season.year}&quarter=${curQ}`);
+  const qv = r.body;
+  check('current quarter view: has today’s facility fee, totals only that quarter',
+    qv.period.current === true && qv.expenses.some((e) => e.expenseId === fac.expenseId) &&
+    qv.expenses.every((e) => e.date >= qv.period.start && e.date <= qv.period.end) &&
+    qv.totalCents === qv.expenses.reduce((t, e) => t + e.amountCents, 0), qv.period);
+  check('quarters offered are the ones that have started', qv.quarters.every((q) => q.quarter <= curQ) && qv.quarters.length === curQ, qv.quarters);
+  r = await A('GET', '/admin/expenses?quarter=5');
+  check('bad quarter rejected', r.status === 400, r);
+
   r = await A('POST', '/admin/expenses/update', { cursor: balls.cursor, date: start, category: 'basketballs', amountCents: 1 });
   check('editing a stale cursor → 404', r.status === 404, r);
 

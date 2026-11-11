@@ -7,7 +7,7 @@ import { DeleteCommand, GetCommand, PutCommand, QueryCommand, TransactWriteComma
 import { ddb, TABLE, GSI1 } from './ddb.js';
 import { newId } from './crypto.js';
 import { clubDate } from './repo.js';
-import { clubYear } from './plans.js';
+import { clubYear, periodFor } from './plans.js';
 
 export const CATEGORIES = ['basketballs', 'insurance', 'facility', 'other'] as const;
 export type Category = (typeof CATEGORIES)[number];
@@ -183,11 +183,21 @@ export async function incomeBetween(from: string, to: string): Promise<number> {
 }
 
 /** Everything the Expenses tab shows for one season. */
-export async function expenseReport(season?: number) {
+/** Club quarter q (1–4) of club year cy: Q1 Apr–Jun … Q4 Jan–Mar. */
+export function quarterRange(cy: number, q: 1 | 2 | 3 | 4) {
+  const startMonth = [4, 7, 10, 1][q - 1];
+  const y = q === 4 ? cy + 1 : cy;
+  const p = periodFor('quarter', `${y}-${String(startMonth).padStart(2, '0')}-01`);
+  return { start: p.start, end: p.end, label: p.label };
+}
+
+/** A season's report, or one quarter of it. */
+export async function expenseReport(season?: number, quarter?: 1 | 2 | 3 | 4) {
   const today = clubDate();
   const current = clubYear(today);
   const cy = season ?? current;
-  const { start, end } = seasonRange(cy);
+  const range = quarter ? quarterRange(cy, quarter) : { ...seasonRange(cy), label: seasonLabel(cy) };
+  const { start, end } = range;
   const [expenses, incomeCents, last] = await Promise.all([listExpenses(start, end), incomeBetween(start, end), lastAmounts()]);
   const byCategory = Object.fromEntries(CATEGORIES.map((c) => [c, 0])) as Record<Category, number>;
   let totalCents = 0;
@@ -198,7 +208,20 @@ export async function expenseReport(season?: number) {
   const month = today.slice(0, 7);
   const monthCents = expenses.filter((e) => e.date.startsWith(month)).reduce((s, e) => s + e.amountCents, 0);
   return {
-    season: { year: cy, label: seasonLabel(cy), start, end, current: cy === current },
+    season: { year: cy, label: seasonLabel(cy), ...seasonRange(cy), current: cy === current },
+    /** What the totals cover: the whole season, or one quarter of it. */
+    period: {
+      quarter: quarter ?? null,
+      label: range.label,
+      start,
+      end,
+      current: today >= start && today <= end,
+    },
+    /** Quarters of this season that have started (for the picker). */
+    quarters: ([1, 2, 3, 4] as const)
+      .map((q) => ({ quarter: q, ...quarterRange(cy, q) }))
+      .filter((q) => q.start <= today)
+      .map((q) => ({ quarter: q.quarter, label: q.label })),
     seasons: Array.from({ length: Math.max(1, current - 2025 + 1) }, (_, i) => current - i)
       .filter((y) => y >= 2025)
       .map((y) => ({ year: y, label: seasonLabel(y) })),
@@ -208,7 +231,7 @@ export async function expenseReport(season?: number) {
     byCategory,
     incomeCents,
     monthCents,
-    facilityThisMonth: cy === current ? expenses.some((e) => e.category === 'facility' && e.date.startsWith(month)) : null,
+    facilityThisMonth: today >= start && today <= end ? expenses.some((e) => e.category === 'facility' && e.date.startsWith(month)) : null,
     lastAmounts: last,
   };
 }

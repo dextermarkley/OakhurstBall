@@ -310,8 +310,11 @@ export const api = {
     });
   },
   // expenses
-  async expenses(season?: number) {
-    return req<ExpenseReport>(`/api/admin/expenses${season ? `?season=${season}` : ''}`, { headers: await authHeaders() });
+  async expenses(season?: number, quarter?: number) {
+    const qs = new URLSearchParams();
+    if (season) qs.set('season', String(season));
+    if (quarter) qs.set('quarter', String(quarter));
+    return req<ExpenseReport>(`/api/admin/expenses${qs.size ? `?${qs}` : ''}`, { headers: await authHeaders() });
   },
   async addExpense(e: ExpenseInput) {
     return req<{ expense: Expense }>('/api/admin/expenses', { method: 'POST', headers: await authHeaders(), body: JSON.stringify(e) });
@@ -458,6 +461,9 @@ export interface Expense extends ExpenseInput {
 export interface ExpenseReport {
   season: { year: number; label: string; start: string; end: string; current: boolean };
   seasons: Array<{ year: number; label: string }>;
+  /** What the totals cover: the whole season (quarter null) or one quarter. */
+  period: { quarter: number | null; label: string; start: string; end: string; current: boolean };
+  quarters: Array<{ quarter: number; label: string }>;
   today: string;
   expenses: Expense[];
   totalCents: number;

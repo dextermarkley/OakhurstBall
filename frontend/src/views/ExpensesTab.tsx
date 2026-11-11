@@ -49,16 +49,18 @@ const MONTH = (ymd: string) => new Date(`${ymd}T12:00:00`).toLocaleDateString([]
 export function ExpensesTab() {
   const confirm = useConfirm();
   const [season, setSeason] = useState<number | undefined>(undefined);
+  /** null: the whole season; 1–4: one quarter of it. */
+  const [quarter, setQuarter] = useState<number | null>(null);
   const [r, setR] = useState<ExpenseReport | null>(null);
   const [editing, setEditing] = useState<{ expense?: Expense; category?: ExpenseCategory } | null>(null);
 
   const load = useCallback(async () => {
     try {
-      setR(await api.expenses(season));
+      setR(await api.expenses(season, quarter ?? undefined));
     } catch (e: any) {
       toast.error(e.message);
     }
-  }, [season]);
+  }, [season, quarter]);
   useEffect(() => {
     load();
   }, [load]);
@@ -81,6 +83,7 @@ export function ExpensesTab() {
   }
 
   const net = r ? r.incomeCents - r.totalCents : 0;
+  const span = r?.period.quarter ? 'quarter' : 'season';
 
   return (
     <div className="space-y-6">
@@ -93,12 +96,30 @@ export function ExpensesTab() {
               <select
                 aria-label="Season"
                 value={r.season.year}
-                onChange={(e) => setSeason(Number(e.target.value))}
+                onChange={(e) => {
+                  setSeason(Number(e.target.value));
+                  setQuarter(null);
+                }}
                 className="h-8 rounded-lg border bg-background px-2.5 text-sm"
               >
                 {r.seasons.map((s) => (
                   <option key={s.year} value={s.year}>
                     {s.label}
+                  </option>
+                ))}
+              </select>
+            )}
+            {r && (
+              <select
+                aria-label="Period"
+                value={quarter ?? ''}
+                onChange={(e) => setQuarter(e.target.value ? Number(e.target.value) : null)}
+                className="h-8 rounded-lg border bg-background px-2.5 text-sm"
+              >
+                <option value="">Whole season</option>
+                {r.quarters.map((q) => (
+                  <option key={q.quarter} value={q.quarter}>
+                    {q.label}
                   </option>
                 ))}
               </select>
@@ -118,7 +139,7 @@ export function ExpensesTab() {
         </div>
       ) : (
         <>
-          {r.facilityThisMonth === false && r.season.current && Number(r.today.slice(8, 10)) > 5 && (
+          {r.facilityThisMonth === false && r.period.current && Number(r.today.slice(8, 10)) > 5 && (
             <Alert>
               <CalendarClock />
               <AlertTitle>No facility payment recorded for {MONTH(r.today)} yet</AlertTitle>
@@ -134,7 +155,7 @@ export function ExpensesTab() {
           )}
 
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <StatCard label="Spent this season" icon={Wallet} value={money(r.totalCents)} hint={r.season.label} />
+            <StatCard label={`Spent this ${span}`} icon={Wallet} value={money(r.totalCents)} hint={r.period.label} />
             <StatCard
               label="Payments received"
               icon={CircleDollarSign}
@@ -143,16 +164,16 @@ export function ExpensesTab() {
               hint="Confirmed card and cash"
             />
             <StatCard
-              label={net < 0 ? 'Short this season' : 'Payments minus expenses'}
+              label={net < 0 ? `Short this ${span}` : 'Payments minus expenses'}
               icon={Receipt}
               tone={net < 0 ? 'danger' : 'default'}
               value={<span className={cn(net < 0 && 'text-destructive')}>{net < 0 ? '−' : ''}{money(net)}</span>}
               hint="Includes credit players haven’t used yet"
             />
-            {r.season.current ? (
+            {r.period.current ? (
               <StatCard label={`Spent in ${MONTH(r.today)}`} icon={CalendarClock} value={money(r.monthCents)} hint="This month" />
             ) : (
-              <StatCard label="Expenses" icon={CalendarClock} value={r.expenses.length} hint="Recorded this season" />
+              <StatCard label="Expenses" icon={CalendarClock} value={r.expenses.length} hint={`Recorded this ${span}`} />
             )}
           </div>
 
@@ -160,7 +181,7 @@ export function ExpensesTab() {
             <Card>
               <CardHeader>
                 <CardTitle>By category</CardTitle>
-                <CardDescription>{r.season.label}</CardDescription>
+                <CardDescription>{r.period.label}</CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
                 {ORDER.map((c) => {
@@ -191,7 +212,7 @@ export function ExpensesTab() {
               <CardHeader>
                 <CardTitle>All expenses</CardTitle>
                 <CardDescription>
-                  {r.expenses.length} recorded · {ymdText(r.season.start)} – {ymdText(r.season.end)}
+                  {r.expenses.length} recorded · {ymdText(r.period.start)} – {ymdText(r.period.end)}
                 </CardDescription>
               </CardHeader>
               <CardContent className="pt-1">
