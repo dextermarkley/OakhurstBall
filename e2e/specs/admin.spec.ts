@@ -170,6 +170,15 @@ test('expenses: add one, see it in the season, delete it', async ({ page }) => {
   await d.getByRole('button', { name: 'Add expense' }).click();
   const row = page.locator('tr', { hasText: note });
   await expect(row).toContainText('$64.99');
+  // Switch to this quarter: it's still listed, and the totals say "this quarter".
+  const period = page.getByLabel('Period');
+  const opts = await period.locator('option').allTextContents();
+  expect(opts[0]).toBe('Whole season');
+  await period.selectOption({ index: opts.length - 1 });
+  await expect(page.getByText('Spent this quarter')).toBeVisible();
+  await expect(page.locator('tr', { hasText: note })).toContainText('$64.99');
+  await period.selectOption({ label: 'Whole season' });
+  await expect(page.getByText('Spent this season')).toBeVisible();
   await row.getByLabel('Delete expense').click();
   await page.getByRole('alertdialog').getByRole('button', { name: /Delete/ }).click();
   await expect(page.locator('tr', { hasText: note })).toHaveCount(0);
