@@ -136,7 +136,7 @@ test('offers: a year pass covers the quarter, but it is not shown as owning a qu
 });
 
 // ── Expenses: input validation + season range ──
-import { checkExpense, seasonRange, seasonLabel, quarterRange } from '../src/lib/expenses.js';
+import { checkExpense, seasonRange, seasonLabel, quarterRange, grantedShare } from '../src/lib/expenses.js';
 
 test('expense: a normal facility payment is accepted and the note is tidied', () => {
   const r = checkExpense({ date: '2026-11-01', category: 'facility', amountCents: 25000, note: '  Nov   court rental ' }, '2026-11-07');
@@ -396,4 +396,16 @@ test('expenses: quarters of a season, Q4 in the next calendar year', () => {
   assert.deepEqual([1, 2, 3, 4].map((q) => quarterRange(2026, q as 1).start), ['2026-04-01', '2026-07-01', '2026-10-01', '2027-01-01']);
   assert.deepEqual([1, 2, 3, 4].map((q) => quarterRange(2026, q as 1).end), ['2026-06-30', '2026-09-30', '2026-12-31', '2027-03-31']);
   assert.match(quarterRange(2026, 3).label, /^Q3 2026–27/);
+});
+
+test('expenses: granted passes count $80 a quarter; paid passes never count', () => {
+  const passes = [
+    { plan: 'year', amountCents: 32000, source: 'admin' },
+    { plan: 'quarter', amountCents: 8000, source: 'admin' },
+    { plan: 'year', amountCents: 32000, source: 'card' },
+    { plan: 'quarter', amountCents: 8000, source: 'cash' },
+  ];
+  assert.deepEqual(grantedShare(passes, false), { cents: 8000 + 8000, yearPasses: 1, quarterPasses: 1 });
+  assert.deepEqual(grantedShare(passes, true), { cents: 32000 + 8000, yearPasses: 1, quarterPasses: 1 });
+  assert.equal(grantedShare([], false).cents, 0);
 });

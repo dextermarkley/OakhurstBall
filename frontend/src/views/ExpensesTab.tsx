@@ -32,6 +32,7 @@ import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '@/
 import { Field, FieldGroup, FieldLabel } from '@/components/ui/field';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Spinner } from '@/components/ui/spinner';
+import { Switch } from '@/components/ui/switch';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { money, ymdText } from '@/lib/format';
 import { cn } from '@/lib/utils';
@@ -53,6 +54,15 @@ export function ExpensesTab() {
   const [quarter, setQuarter] = useState<number | null>(null);
   const [r, setR] = useState<ExpenseReport | null>(null);
   const [editing, setEditing] = useState<{ expense?: Expense; category?: ExpenseCategory } | null>(null);
+  /** Count admin-granted passes as if they were paid (remembered on this device). */
+  const [countGranted, setCountGranted] = useState(() => localStorage.getItem('expenses.countGranted') === '1');
+  function toggleGranted(on: boolean) {
+    setCountGranted(on);
+    localStorage.setItem('expenses.countGranted', on ? '1' : '0');
+  }
+  const grantedCents = r && countGranted ? r.granted.cents : 0;
+  const income = (r?.incomeCents ?? 0) + grantedCents;
+  const grantedCount = r ? r.granted.yearPasses + r.granted.quarterPasses : 0;
 
   const load = useCallback(async () => {
     try {
@@ -82,7 +92,7 @@ export function ExpensesTab() {
     }
   }
 
-  const net = r ? r.incomeCents - r.totalCents : 0;
+  const net = r ? income - r.totalCents : 0;
   const span = r?.period.quarter ? 'quarter' : 'season';
 
   return (
@@ -154,14 +164,27 @@ export function ExpensesTab() {
             </Alert>
           )}
 
+          <label className="flex w-fit cursor-pointer items-center gap-2.5 text-sm">
+            <Switch checked={countGranted} onCheckedChange={toggleGranted} aria-label="Count granted passes as paid" />
+            <span>
+              Count granted passes as paid
+              <span className="block text-xs text-muted-foreground">
+                {grantedCount === 0
+                  ? `No passes granted this ${span}`
+                  : `${grantedCount} granted ${grantedCount === 1 ? 'pass' : 'passes'} worth ${money(r.granted.cents)} this ${span}` +
+                    (r.granted.yearPasses ? ' (year passes count $80 a quarter)' : '')}
+              </span>
+            </span>
+          </label>
+
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <StatCard label={`Spent this ${span}`} icon={Wallet} value={money(r.totalCents)} hint={r.period.label} />
             <StatCard
-              label="Payments received"
+              label={countGranted ? 'Payments + granted passes' : 'Payments received'}
               icon={CircleDollarSign}
               tone="success"
-              value={money(r.incomeCents)}
-              hint="Confirmed card and cash"
+              value={money(income)}
+              hint={countGranted ? `${money(r.incomeCents)} paid + ${money(r.granted.cents)} granted` : 'Confirmed card and cash'}
             />
             <StatCard
               label={net < 0 ? `Short this ${span}` : 'Payments minus expenses'}

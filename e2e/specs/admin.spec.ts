@@ -179,6 +179,12 @@ test('expenses: add one, see it in the season, delete it', async ({ page }) => {
   await expect(page.locator('tr', { hasText: note })).toContainText('$64.99');
   await period.selectOption({ label: 'Whole season' });
   await expect(page.getByText('Spent this season')).toBeVisible();
+  // The granted-passes switch adds them into the payments card, and turns back off.
+  const sw = page.getByRole('switch', { name: 'Count granted passes as paid' });
+  await sw.click();
+  await expect(page.getByText('Payments + granted passes')).toBeVisible();
+  await sw.click();
+  await expect(page.getByText('Payments received')).toBeVisible();
   await row.getByLabel('Delete expense').click();
   await page.getByRole('alertdialog').getByRole('button', { name: /Delete/ }).click();
   await expect(page.locator('tr', { hasText: note })).toHaveCount(0);

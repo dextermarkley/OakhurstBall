@@ -3,7 +3,7 @@
 //   AWS_REGION=us-west-2 node test/live-expenses.mjs
 import { randomBytes } from 'node:crypto';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
-import { DynamoDBDocumentClient, DeleteCommand, QueryCommand } from '@aws-sdk/lib-dynamodb';
+import { DynamoDBDocumentClient, DeleteCommand, PutCommand, QueryCommand } from '@aws-sdk/lib-dynamodb';
 import {
   CognitoIdentityProviderClient, AdminCreateUserCommand, AdminSetUserPasswordCommand,
   AdminAddUserToGroupCommand, AdminDeleteUserCommand, InitiateAuthCommand,
@@ -46,6 +46,7 @@ async function login(label, admin) {
 }
 
 const mine = new Set();
+const fakePasses = [];
 try {
   const A = await login('admin', true);
   const P = await login('player', false);
@@ -56,6 +57,24 @@ try {
 
   r = await P('GET', '/admin/expenses');
   check('players cannot see expenses', r.status === 403, r.status);
+
+  // Granted passes: a granted year pass is worth $80 in each quarter and $320 in
+  // the season; a paid one isn't counted here (its money is already income).
+  {
+    const cy = before.season.year;
+    const nq = before.quarters.length;
+    const qBefore = (await A('GET', `/admin/expenses?season=${cy}&quarter=${nq}`)).body;
+    for (const [pid, source] of [[`zz-exp-${hex(6)}`, 'admin'], [`zz-exp-${hex(6)}`, 'card']]) {
+      const item = { PK: `PLAYER#${pid}`, SK: `PASS#Y${cy}`, GSI1PK: `PASS#Y${cy}`, GSI1SK: pid, playerId: pid, plan: 'year', periodId: `Y${cy}`, amountCents: 32000, source, createdAt: new Date().toISOString() };
+      await ddb.send(new PutCommand({ TableName: TABLE, Item: item }));
+      fakePasses.push({ PK: item.PK, SK: item.SK });
+    }
+    const s = (await A('GET', `/admin/expenses?season=${cy}`)).body;
+    const q = (await A('GET', `/admin/expenses?season=${cy}&quarter=${nq}`)).body;
+    check('granted year pass counts $320 for the season', s.granted.cents - before.granted.cents === 32000 && s.granted.yearPasses - before.granted.yearPasses === 1, s.granted);
+    check('granted year pass counts $80 for the quarter', q.granted.cents - qBefore.granted.cents === 8000, { before: qBefore.granted, after: q.granted });
+    check('granted passes are not real income', s.incomeCents === before.incomeCents, { before: before.incomeCents, after: s.incomeCents });
+  }
   r = await P('POST', '/admin/expenses', { date: today, category: 'facility', amountCents: 100 });
   check('players cannot add expenses', r.status === 403, r.status);
 
@@ -129,6 +148,7 @@ try {
   failures++;
 } finally {
   for (const c of mine) await ddb.send(new DeleteCommand({ TableName: TABLE, Key: { PK: 'EXPENSE', SK: c } })).catch(() => {});
+  for (const k of fakePasses) await ddb.send(new DeleteCommand({ TableName: TABLE, Key: k })).catch(() => {});
   // Player profiles created by the post-confirmation trigger? These users are
   // created by admin API (no trigger), so there are none to remove.
   for (const u of users) await cognito.send(new AdminDeleteUserCommand({ UserPoolId: POOL, Username: u })).catch(() => {});

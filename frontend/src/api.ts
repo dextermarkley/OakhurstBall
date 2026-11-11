@@ -469,6 +469,8 @@ export interface ExpenseReport {
   totalCents: number;
   byCategory: Record<ExpenseCategory, number>;
   incomeCents: number;
+  /** Admin-granted passes credited to this period ($80 a quarter for a year pass). Not real income. */
+  granted: { cents: number; yearPasses: number; quarterPasses: number };
   monthCents: number;
   facilityThisMonth: boolean | null;
   lastAmounts: Partial<Record<ExpenseCategory, number>>;

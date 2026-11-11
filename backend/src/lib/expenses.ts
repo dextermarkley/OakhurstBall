@@ -8,6 +8,8 @@ import { ddb, TABLE, GSI1 } from './ddb.js';
 import { newId } from './crypto.js';
 import { clubDate } from './repo.js';
 import { clubYear, periodFor } from './plans.js';
+import { queryAll } from './page.js';
+import type { Pass } from './passes.js';
 
 export const CATEGORIES = ['basketballs', 'insurance', 'facility', 'other'] as const;
 export type Category = (typeof CATEGORIES)[number];
@@ -182,7 +184,48 @@ export async function incomeBetween(from: string, to: string): Promise<number> {
   return total;
 }
 
-/** Everything the Expenses tab shows for one season. */
+/**
+ * What admin-granted passes are worth to a period, for the "count granted
+ * passes" view. No money moved for these, so they never count as real income.
+ * A quarter pass counts its price in its own quarter. A year pass counts a
+ * quarter of its price in each quarter, so all of it in the whole-season view.
+ */
+export function grantedShare(passes: Array<{ plan: string; amountCents: number; source: string }>, wholeSeason: boolean) {
+  let cents = 0;
+  let yearPasses = 0;
+  let quarterPasses = 0;
+  for (const p of passes) {
+    if (p.source !== 'admin') continue;
+    if (p.plan === 'year') {
+      yearPasses++;
+      cents += wholeSeason ? p.amountCents : Math.round(p.amountCents / 4);
+    } else if (p.plan === 'quarter') {
+      quarterPasses++;
+      cents += p.amountCents;
+    }
+  }
+  return { cents, yearPasses, quarterPasses };
+}
+
+/** Admin-granted passes for a season, or for one quarter plus the season's year passes. */
+async function grantedPasses(cy: number, quarter?: 1 | 2 | 3 | 4) {
+  const ids = [
+    periodFor('year', seasonRange(cy).start).periodId,
+    ...(quarter ? [quarter] : ([1, 2, 3, 4] as const)).map((q) => periodFor('quarter', quarterRange(cy, q).start).periodId),
+  ];
+  const lists = await Promise.all(
+    ids.map((id) =>
+      queryAll<Pass>({
+        TableName: TABLE,
+        IndexName: GSI1,
+        KeyConditionExpression: 'GSI1PK = :pk',
+        ExpressionAttributeValues: { ':pk': `PASS#${id}` },
+      }),
+    ),
+  );
+  return grantedShare(lists.flat(), !quarter);
+}
+
 /** Club quarter q (1–4) of club year cy: Q1 Apr–Jun … Q4 Jan–Mar. */
 export function quarterRange(cy: number, q: 1 | 2 | 3 | 4) {
   const startMonth = [4, 7, 10, 1][q - 1];
@@ -198,7 +241,12 @@ export async function expenseReport(season?: number, quarter?: 1 | 2 | 3 | 4) {
   const cy = season ?? current;
   const range = quarter ? quarterRange(cy, quarter) : { ...seasonRange(cy), label: seasonLabel(cy) };
   const { start, end } = range;
-  const [expenses, incomeCents, last] = await Promise.all([listExpenses(start, end), incomeBetween(start, end), lastAmounts()]);
+  const [expenses, incomeCents, granted, last] = await Promise.all([
+    listExpenses(start, end),
+    incomeBetween(start, end),
+    grantedPasses(cy, quarter),
+    lastAmounts(),
+  ]);
   const byCategory = Object.fromEntries(CATEGORIES.map((c) => [c, 0])) as Record<Category, number>;
   let totalCents = 0;
   for (const e of expenses) {
@@ -230,6 +278,8 @@ export async function expenseReport(season?: number, quarter?: 1 | 2 | 3 | 4) {
     totalCents,
     byCategory,
     incomeCents,
+    /** Admin-granted passes credited to this period (not real income). */
+    granted,
     monthCents,
     facilityThisMonth: today >= start && today <= end ? expenses.some((e) => e.category === 'facility' && e.date.startsWith(month)) : null,
     lastAmounts: last,
