@@ -81,6 +81,29 @@ test('confirming a player’s cash on the Payments tab credits them', async ({ p
   w.assertClean();
 });
 
+test('clear a player’s unpaid debt with a credit (not counted as income)', async ({ page }) => {
+  const w = watch(page);
+  const debtor = await makeUser({ label: 'debtor', balanceCents: -1500 });
+  await openAdmin(page, 'players');
+  const row = page.locator('tr', { hasText: debtor.name });
+  await expect(row).toContainText('$15.00');
+  await page.getByRole('button', { name: `Actions for ${debtor.name}` }).click();
+  await page.getByRole('menuitem', { name: /Clear debt/ }).click();
+  const d = page.getByRole('dialog');
+  await expect(d.getByRole('heading', { name: `Clear ${debtor.name}’s debt` })).toBeVisible();
+  await expect(d.getByLabel('Amount (USD)')).toHaveValue('15.00'); // prefilled with what they owe
+  await expect(d.getByLabel('Reason')).toHaveValue('Forgave unpaid sessions');
+  await expect(d).toContainText('New balance: $0.00');
+  await d.getByRole('button', { name: 'Clear debt' }).click();
+  await expect(page.getByText(`Credited ${debtor.name} $15.00. Balance is now $0.00.`)).toBeVisible();
+  expect((await getPlayer(debtor.playerId))?.balanceCents).toBe(0);
+  const audit = await ddb.send(new QueryCommand({ TableName: ENV.TABLE, KeyConditionExpression: 'PK = :p AND begins_with(SK, :s)',
+    ExpressionAttributeValues: { ':p': `PLAYER#${debtor.playerId}`, ':s': 'ADJUST#' } }));
+  const a0 = audit.Items?.[0];
+  expect([a0?.deltaCents, a0?.note, a0?.bySub]).toEqual([1500, 'Forgave unpaid sessions', admin.sub]);
+  w.assertClean();
+});
+
 test('club notice: post without notifying, players see it, take it down', async ({ page }) => {
   const w = watch(page);
   const text = `ZZ E2E gym closed for maintenance ${run}`;

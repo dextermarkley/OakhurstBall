@@ -249,11 +249,11 @@ export const api = {
       body: JSON.stringify({ amountCents, note }),
     });
   },
-  async credit(playerId: string, amountCents: number) {
-    return req(`/api/admin/players/${playerId}/credit`, {
+  async credit(playerId: string, amountCents: number, note?: string) {
+    return req<{ balanceCents: number }>(`/api/admin/players/${playerId}/credit`, {
       method: 'POST',
       headers: await authHeaders(),
-      body: JSON.stringify({ amountCents }),
+      body: JSON.stringify({ amountCents, note }),
     });
   },
   /** The whole pending queue (paged on the server). */

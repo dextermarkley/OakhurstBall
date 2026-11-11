@@ -25,6 +25,7 @@ import {
   UserX,
   Users,
   ShieldOff,
+  HandCoins,
 } from 'lucide-react';
 import { api, type AdminSession, type Attendee, type Plan, type PlanOffer } from '@/api';
 import { AppShell, PageHeader } from '@/components/app-shell';
@@ -751,6 +752,7 @@ function PlayersTab() {
   const [onlyAdmins, setOnlyAdmins] = useState(() => new URLSearchParams(window.location.search).get('filter') === 'admins');
   const [adding, setAdding] = useState(false);
   const [charging, setCharging] = useState<any>(null);
+  const [crediting, setCrediting] = useState<any>(null);
   const [viewing, setViewing] = useState<any>(null);
 
   const load = useCallback(async () => {
@@ -990,6 +992,9 @@ function PlayersTab() {
                           <DropdownMenuItem onClick={() => setCharging(p)}>
                             <Banknote /> Charge…
                           </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => setCrediting(p)}>
+                            <HandCoins /> {p.balanceCents < 0 ? 'Clear debt / credit…' : 'Credit…'}
+                          </DropdownMenuItem>
                           {p.isAdmin ? (
                             !p.isMe && (
                               <DropdownMenuItem onClick={() => setAdmin(p, false)}>
@@ -1043,6 +1048,7 @@ function PlayersTab() {
 
       <AddPlayerDialog open={adding} onOpenChange={setAdding} onDone={load} />
       <ChargeDialog player={charging} onClose={() => setCharging(null)} onDone={load} />
+      <CreditDialog player={crediting} onClose={() => setCrediting(null)} onDone={load} />
       <PlayerSheet p={viewing} versions={versions ?? undefined} onClose={() => setViewing(null)} />
     </div>
   );
@@ -1100,6 +1106,95 @@ function AddPlayerDialog({ open, onOpenChange, onDone }: { open: boolean; onOpen
             </Button>
             <Button type="submit" disabled={form.formState.isSubmitting}>
               {form.formState.isSubmitting && <Spinner />} Add player
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+const creditSchema = chargeSchema.extend({
+  reason: z.string().trim().min(2, 'Say why, e.g. “Forgave unpaid sessions”').max(200),
+});
+const CREDIT_REASONS = ['Forgave unpaid sessions', 'Paid outside the app', 'Refund', 'Correction'];
+
+/**
+ * Add money to a player's balance without a payment: e.g. clear a debt they
+ * won't pay. Saved with the reason and who did it (ADJUST# audit row); it is not
+ * counted as income.
+ */
+function CreditDialog({ player, onClose, onDone }: { player: any; onClose: () => void; onDone: () => void }) {
+  const owes = player && player.balanceCents < 0 ? -player.balanceCents : 0;
+  const form = useForm<z.infer<typeof creditSchema>>({ resolver: zodResolver(creditSchema), defaultValues: { amount: '', reason: '' } });
+  useEffect(() => {
+    if (player) form.reset({ amount: owes ? (owes / 100).toFixed(2) : '', reason: owes ? 'Forgave unpaid sessions' : '' });
+  }, [player]); // eslint-disable-line react-hooks/exhaustive-deps
+  const cents = Math.round(Number(form.watch('amount')) * 100) || 0;
+  const reason = form.watch('reason');
+  const submit = form.handleSubmit(async (v) => {
+    const c = Math.round(Number(v.amount) * 100);
+    try {
+      const r = await api.credit(player.playerId, c, v.reason);
+      toast.success(`Credited ${player.name} ${money(c)}. Balance is now ${balanceText(r.balanceCents)}.`);
+      onClose();
+      onDone();
+    } catch (e: any) {
+      toast.error(e.message);
+    }
+  });
+  return (
+    <Dialog open={!!player} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="sm:max-w-sm">
+        <form onSubmit={submit} noValidate>
+          <DialogHeader>
+            <DialogTitle>{owes ? `Clear ${player?.name}’s debt` : `Credit ${player?.name}`}</DialogTitle>
+            <DialogDescription>
+              Adds to their balance with no payment, and isn’t counted as income. Balance: {player && balanceText(player.balanceCents)}.
+            </DialogDescription>
+          </DialogHeader>
+          <FieldGroup className="py-5">
+            <div>
+              <FormInput control={form.control} name="amount" label="Amount (USD)" inputMode="decimal" placeholder="5.00" autoComplete="off" />
+              {owes > 0 && (
+                <div className="mt-2 flex gap-2">
+                  <button
+                    type="button"
+                    className="rounded-full border px-2.5 py-0.5 text-xs hover:bg-muted"
+                    onClick={() => form.setValue('amount', (owes / 100).toFixed(2), { shouldValidate: true })}
+                  >
+                    Clear it all · {money(owes)}
+                  </button>
+                </div>
+              )}
+            </div>
+            <div>
+              <FormInput control={form.control} name="reason" label="Reason" placeholder="Forgave unpaid sessions" autoComplete="off" maxLength={200} />
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {CREDIT_REASONS.map((r) => (
+                  <button
+                    key={r}
+                    type="button"
+                    onClick={() => form.setValue('reason', r, { shouldValidate: true })}
+                    className={cn('rounded-full border px-2.5 py-0.5 text-xs', reason === r ? 'border-primary bg-primary text-primary-foreground' : 'hover:bg-muted')}
+                  >
+                    {r}
+                  </button>
+                ))}
+              </div>
+            </div>
+            {player && cents > 0 && (
+              <p className="text-sm text-muted-foreground">
+                New balance: <span className="font-medium text-foreground">{balanceText(player.balanceCents + cents)}</span>
+              </p>
+            )}
+          </FieldGroup>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={onClose}>
+              Cancel
+            </Button>
+            <Button type="submit" disabled={form.formState.isSubmitting}>
+              {form.formState.isSubmitting && <Spinner />} {owes ? 'Clear debt' : 'Add credit'}
             </Button>
           </DialogFooter>
         </form>
